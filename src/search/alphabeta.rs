@@ -1,10 +1,9 @@
-use shakmaty::{Chess, Color, Position};
-
 use super::{Search, SearchConfig, SearchResult, Value};
+use crate::utils::consts::MATE_VALUE;
+use shakmaty::{Chess, Color, Position};
 
 const INITIAL_ALPHA: Value = Value::MIN;
 const INITIAL_BETA: Value = Value::MAX;
-const MATE_VALUE: Value = 1000000;
 
 pub struct AlphaBetaSearch {
     pub config: SearchConfig,
