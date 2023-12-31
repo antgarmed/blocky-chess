@@ -37,7 +37,7 @@ impl AlphaBetaSearch {
             };
         }
 
-        let moves = position.legal_moves();
+        let moves = (self.config.move_generator)(position);
 
         if color_to_maximize.is_white() {
             let mut best_search_result = SearchResult {
