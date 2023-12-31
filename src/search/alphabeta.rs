@@ -161,4 +161,37 @@ mod tests {
             "g4h4"
         );
     }
+
+    #[test]
+    fn test_search_solves_mate_in_2_black_to_play_when_depth_is_4() {
+        let fen: Fen = "1r2nk2/3n4/pB1P4/2P4p/3Q1P1q/4P1p1/5P2/RR4K1 b - - 0 1"
+            .parse()
+            .unwrap();
+        let position: Chess = fen.into_position(CastlingMode::Standard).unwrap();
+        let depth = 4;
+
+        let result = AlphaBetaSearch {
+            config: BASIC_CONFIG,
+        }
+        .search(&position, depth);
+
+        assert_eq!(
+            result.principal_variation[0]
+                .to_uci(CastlingMode::Standard)
+                .to_string(),
+            "h4h2"
+        );
+        assert_eq!(
+            result.principal_variation[1]
+                .to_uci(CastlingMode::Standard)
+                .to_string(),
+            "g1f1"
+        );
+        assert_eq!(
+            result.principal_variation[2]
+                .to_uci(CastlingMode::Standard)
+                .to_string(),
+            "h2f2"
+        );
+    }
 }
