@@ -1,4 +1,5 @@
 mod evaluation;
+mod movegen;
 mod search;
 mod utils;
 
