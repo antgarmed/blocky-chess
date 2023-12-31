@@ -10,7 +10,7 @@ pub struct AlphaBetaSearch {
 }
 
 impl Search for AlphaBetaSearch {
-    fn search(&self, initial_position: &mut Chess, depth: usize) -> SearchResult {
+    fn search(&self, initial_position: &Chess, depth: usize) -> SearchResult {
         self.alpha_beta_search(
             initial_position,
             depth,
@@ -57,7 +57,7 @@ impl AlphaBetaSearch {
                 }
 
                 if child_result.value > best_search_result.value {
-                    best_search_result.value = child_result.value;
+                    best_search_result = child_result;
                     best_search_result.principal_variation.insert(0, m);
                 }
 
@@ -86,8 +86,8 @@ impl AlphaBetaSearch {
                     child_result.value += child_result.principal_variation.len() as i64
                 }
 
-                if child_result.value > best_search_result.value {
-                    best_search_result.value = child_result.value;
+                if child_result.value < best_search_result.value {
+                    best_search_result = child_result;
                     best_search_result.principal_variation.insert(0, m);
                 }
 
@@ -100,5 +100,65 @@ impl AlphaBetaSearch {
 
             return best_search_result;
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::evaluation::zero_evalution::zero_evalution;
+    use crate::movegen::basic_movegen::basic_movegen;
+    use shakmaty::fen::Fen;
+    use shakmaty::CastlingMode;
+
+    const BASIC_CONFIG: SearchConfig = SearchConfig {
+        evaluation_function: zero_evalution,
+        move_generator: basic_movegen,
+    };
+
+    #[test]
+    fn test_search_returns_result_when_depth_is_1() {
+        let position = Chess::default();
+        let depth = 1;
+
+        let result = AlphaBetaSearch {
+            config: BASIC_CONFIG,
+        }
+        .search(&position, depth);
+
+        assert!(result.principal_variation.len() >= 1);
+    }
+
+    #[test]
+    fn test_search_solves_mate_in_2_white_to_play_when_depth_is_4() {
+        let fen: Fen = "r4r1k/b1p3pp/p2P2p1/1p6/1P4R1/1B5Q/Pq3P2/R5K1 w - - 0 1"
+            .parse()
+            .unwrap();
+        let position: Chess = fen.into_position(CastlingMode::Standard).unwrap();
+        let depth = 4;
+
+        let result = AlphaBetaSearch {
+            config: BASIC_CONFIG,
+        }
+        .search(&position, depth);
+
+        assert_eq!(
+            result.principal_variation[0]
+                .to_uci(CastlingMode::Standard)
+                .to_string(),
+            "h3h7"
+        );
+        assert_eq!(
+            result.principal_variation[1]
+                .to_uci(CastlingMode::Standard)
+                .to_string(),
+            "h8h7"
+        );
+        assert_eq!(
+            result.principal_variation[2]
+                .to_uci(CastlingMode::Standard)
+                .to_string(),
+            "g4h4"
+        );
     }
 }

@@ -1,4 +1,4 @@
-use shakmaty::{Chess, Move};
+use shakmaty::{Chess, Move, MoveList};
 
 pub type Value = i64;
 
@@ -9,7 +9,7 @@ pub struct SearchResult {
 
 pub struct SearchConfig {
     pub evaluation_function: fn(&Chess) -> Value,
-    pub move_generator: fn(&Chess) -> Vec<Move>,
+    pub move_generator: fn(&Chess) -> MoveList,
 }
 
 pub trait SearchFactory {
@@ -17,7 +17,7 @@ pub trait SearchFactory {
 }
 
 pub trait Search {
-    fn search(&self, initial_position: &mut Chess, depth: usize) -> SearchResult;
+    fn search(&self, initial_position: &Chess, depth: usize) -> SearchResult;
 }
 
 pub mod alphabeta;
