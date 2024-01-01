@@ -9,6 +9,12 @@ pub struct AlphaBetaSearch {
     pub config: SearchConfig,
 }
 
+impl AlphaBetaSearch {
+    pub fn new(config: SearchConfig) -> Self {
+        Self { config }
+    }
+}
+
 impl Search for AlphaBetaSearch {
     fn search(&self, initial_position: &Chess, depth: usize) -> SearchResult {
         self.alpha_beta_search(
