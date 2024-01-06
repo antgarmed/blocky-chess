@@ -56,10 +56,10 @@ impl AlphaBetaSearch {
                 let mut child_result =
                     self.alpha_beta_search(&child_node, depth - 1, alpha, beta, Color::Black);
 
-                if child_result.value == MATE_VALUE {
-                    child_result.value -= child_result.principal_variation.len() as i64
-                } else if child_result.value == -MATE_VALUE {
-                    child_result.value += child_result.principal_variation.len() as i64
+                if child_result.is_mate() && child_result.is_white_winning() {
+                    child_result.value = MATE_VALUE - depth as i64;
+                } else if child_result.is_mate() && child_result.is_black_winning() {
+                    child_result.value = depth as i64 - MATE_VALUE;
                 }
 
                 if child_result.value > best_search_result.value {
@@ -86,10 +86,10 @@ impl AlphaBetaSearch {
                 let mut child_result =
                     self.alpha_beta_search(&child_node, depth - 1, alpha, beta, Color::White);
 
-                if child_result.value == MATE_VALUE {
-                    child_result.value -= child_result.principal_variation.len() as i64
-                } else if child_result.value == -MATE_VALUE {
-                    child_result.value += child_result.principal_variation.len() as i64
+                if child_result.is_mate() && child_result.is_white_winning() {
+                    child_result.value = MATE_VALUE - depth as i64;
+                } else if child_result.is_mate() && child_result.is_black_winning() {
+                    child_result.value = depth as i64 - MATE_VALUE;
                 }
 
                 if child_result.value < best_search_result.value {
@@ -148,6 +148,7 @@ mod tests {
         }
         .search(&position, depth);
 
+        assert_eq!(result.get_mate_in(), Some(2));
         assert_eq!(
             result.principal_variation[0]
                 .to_uci(CastlingMode::Standard)
@@ -181,6 +182,7 @@ mod tests {
         }
         .search(&position, depth);
 
+        assert_eq!(result.get_mate_in(), Some(2));
         assert_eq!(
             result.principal_variation[0]
                 .to_uci(CastlingMode::Standard)
