@@ -112,13 +112,13 @@ impl AlphaBetaSearch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::evaluation::zero_evalution::zero_evalution;
+    use crate::evaluation::zero_evaluation::zero_evaluation;
     use crate::movegen::basic_movegen::basic_movegen;
     use shakmaty::fen::Fen;
     use shakmaty::CastlingMode;
 
     const BASIC_CONFIG: SearchConfig = SearchConfig {
-        evaluation_function: zero_evalution,
+        evaluation_function: zero_evaluation,
         move_generator: basic_movegen,
     };
 
@@ -201,5 +201,37 @@ mod tests {
                 .to_string(),
             "h2f2"
         );
+    }
+
+    #[test]
+    fn test_search_solves_mate_in_3_white_to_play_when_depth_is_6() {
+        let fen: Fen = "2b2k1r/4rppp/p3p3/1pp1q1N1/8/7P/PPP3P1/3R1RK1 w - - 0 1"
+            .parse()
+            .unwrap();
+        let position: Chess = fen.into_position(CastlingMode::Standard).unwrap();
+        let depth = 6;
+
+        let result = AlphaBetaSearch {
+            config: BASIC_CONFIG,
+        }
+        .search(&position, depth);
+
+        assert_eq!(result.get_mate_in(), Some(3));
+    }
+
+    #[test]
+    fn test_search_solves_mate_in_3_black_to_play_when_depth_is_6() {
+        let fen: Fen = "6k1/p1p3pp/4P3/3Q4/6PK/1P3r1P/P1P5/7r b - - 0 1"
+            .parse()
+            .unwrap();
+        let position: Chess = fen.into_position(CastlingMode::Standard).unwrap();
+        let depth = 6;
+
+        let result = AlphaBetaSearch {
+            config: BASIC_CONFIG,
+        }
+        .search(&position, depth);
+
+        assert_eq!(result.get_mate_in(), Some(3));
     }
 }
