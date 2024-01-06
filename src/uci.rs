@@ -1,5 +1,5 @@
 use crate::engine::Engine;
-use crate::evaluation::zero_evalution::zero_evalution;
+use crate::evaluation::zero_evaluation::zero_evaluation;
 use crate::movegen::basic_movegen::basic_movegen;
 use crate::search::alphabeta::AlphaBetaSearch;
 use crate::search::SearchConfig;
@@ -64,7 +64,7 @@ pub fn start() {
 
 fn get_engine() -> Engine {
     let search_algorithm = Box::new(AlphaBetaSearch::new(SearchConfig {
-        evaluation_function: zero_evalution,
+        evaluation_function: zero_evaluation,
         move_generator: basic_movegen,
     }));
 
