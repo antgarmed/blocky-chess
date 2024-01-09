@@ -1,17 +1,10 @@
-use crate::{search::Value, utils::consts::MATE_VALUE};
-use shakmaty::{Chess, Color, Outcome, Position};
+use super::evaluate_outcome;
+use crate::search::Value;
+use shakmaty::{Chess, Position};
 
 pub fn zero_evaluation(position: &Chess) -> Value {
     if let Some(outcome) = position.outcome() {
-        match outcome {
-            Outcome::Decisive { winner } => {
-                return match winner {
-                    Color::White => MATE_VALUE,
-                    Color::Black => -MATE_VALUE,
-                };
-            }
-            Outcome::Draw => return 0,
-        }
+        return evaluate_outcome(&outcome);
     }
 
     0

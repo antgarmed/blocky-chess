@@ -1,5 +1,5 @@
 use crate::engine::Engine;
-use crate::evaluation::zero_evaluation::zero_evaluation;
+use crate::evaluation::material_mobility_evaluation::material_mobility_evaluation;
 use crate::movegen::basic_movegen::basic_movegen;
 use crate::search::alphabeta::AlphaBetaSearch;
 use crate::search::SearchConfig;
@@ -64,7 +64,7 @@ pub fn start() {
 
 fn get_engine() -> Engine {
     let search_algorithm = Box::new(AlphaBetaSearch::new(SearchConfig {
-        evaluation_function: zero_evaluation,
+        evaluation_function: material_mobility_evaluation,
         move_generator: basic_movegen,
     }));
 
@@ -93,7 +93,7 @@ fn handle_go(
         .collect::<Vec<String>>()
         .join(" ");
 
-    println!("info depth {} score {} pv {}", depth, score, pv);
+    println!("info depth {} score cp {} pv {}", depth, score, pv);
     println!(
         "bestmove {}",
         best_move.to_uci(CastlingMode::Standard).to_string()
