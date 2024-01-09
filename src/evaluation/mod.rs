@@ -114,6 +114,22 @@ fn get_number_of_black_queens(position: &Chess) -> usize {
         .count()
 }
 
+fn get_number_of_moves_for_white(position: &Chess) -> usize {
+    if position.turn() == Color::Black {
+        return position.clone().legal_moves().len();
+    }
+
+    position.legal_moves().len()
+}
+
+fn get_number_of_moves_for_black(position: &Chess) -> usize {
+    if position.turn() == Color::White {
+        return position.clone().legal_moves().len();
+    }
+
+    position.legal_moves().len()
+}
+
 pub mod material_evaluation;
 pub mod material_mobility_evaluation;
 pub mod zero_evaluation;
