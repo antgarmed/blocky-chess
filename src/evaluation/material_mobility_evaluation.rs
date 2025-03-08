@@ -15,7 +15,7 @@ pub fn material_mobility_evaluation(position: &Chess) -> Value {
     let material_value = material_evaluation(position);
     let mobility_value = get_white_mobility(position) - get_black_mobility(position);
 
-    material_value + 1000 * mobility_value
+    mobility_value
 }
 
 fn get_white_mobility(position: &Chess) -> Value {
