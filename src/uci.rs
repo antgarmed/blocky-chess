@@ -16,7 +16,14 @@ pub fn start() {
     println!("{}", engine.get_full_name());
 
     for line in io::stdin().lock().lines() {
-        let message: UciMessage = parse_one(&line.unwrap());
+        let line = match line {
+            Ok(l) => l,
+            Err(e) => {
+                eprintln!("Error reading input: {}", e);
+                continue;
+            }
+        };
+        let message: UciMessage = parse_one(&line);
         match message {
             UciMessage::Uci => {
                 let response = UciMessage::Id {
@@ -76,26 +83,32 @@ fn handle_go(
     _time_control: Option<UciTimeControl>,
     search_control: Option<UciSearchControl>,
 ) {
-    let mut depth = 6;
-
-    if search_control.is_some() {
-        depth = search_control.unwrap().depth.unwrap() as usize;
-    }
+    let depth = search_control
+        .and_then(|sc| sc.depth)
+        .map(|d| d as usize)
+        .unwrap_or(6);
 
     let search_result = engine.go(depth);
 
-    let best_move = search_result.principal_variation.first().unwrap();
-    let score = search_result.value;
-    let pv = search_result
-        .principal_variation
-        .iter()
-        .map(|m| m.to_uci(CastlingMode::Standard).to_string())
-        .collect::<Vec<String>>()
-        .join(" ");
+    match search_result.principal_variation.first() {
+        Some(best_move) => {
+            let score = search_result.value;
+            let pv = search_result
+                .principal_variation
+                .iter()
+                .map(|m| m.to_uci(CastlingMode::Standard).to_string())
+                .collect::<Vec<String>>()
+                .join(" ");
 
-    println!("info depth {} score cp {} pv {}", depth, score, pv);
-    println!(
-        "bestmove {}",
-        best_move.to_uci(CastlingMode::Standard).to_string()
-    );
+            println!("info depth {} score cp {} pv {}", depth, score, pv);
+            println!(
+                "bestmove {}",
+                best_move.to_uci(CastlingMode::Standard).to_string()
+            );
+        }
+        None => {
+            println!("info string No legal moves found");
+            println!("bestmove 0000"); // UCI protocol's way to indicate no move
+        }
+    }
 }
