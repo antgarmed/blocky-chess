@@ -133,3 +133,22 @@ fn get_number_of_moves_for_black(position: &Chess) -> usize {
 pub mod material_evaluation;
 pub mod material_mobility_evaluation;
 pub mod zero_evaluation;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use shakmaty::fen::Fen;
+    use shakmaty::CastlingMode;
+
+    #[test]
+    fn test_search_returns_result_when_depth_is_1() {
+        let fen: Fen = "rnbqkbnr/pppppppp/8/8/8/8/PPPPPPPP/RNBQKBNR w KQkq - 0 1"
+            .parse()
+            .unwrap();
+        let position: Chess = fen.into_position(CastlingMode::Standard).unwrap();
+
+        let result = get_number_of_moves_for_white(&position);
+
+        assert_eq!(result, 20);
+    }
+}
