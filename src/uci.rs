@@ -112,3 +112,45 @@ fn handle_go(
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use vampirc_uci::UciSearchControl;
+
+    #[test]
+    fn test_engine_creation() {
+        let engine = get_engine();
+        assert!(!engine.get_full_name().is_empty());
+        assert!(!engine.get_author().is_empty());
+    }
+
+    #[test]
+    fn test_handle_go_with_default_depth() {
+        let mut engine = get_engine();
+        engine.set_default_position();
+        let search_control = Some(UciSearchControl {
+            depth: Some(4),
+            ..Default::default()
+        });
+        handle_go(&mut engine, None, search_control);
+    }
+
+    #[test]
+    fn test_handle_go_with_custom_depth() {
+        let mut engine = get_engine();
+        engine.set_default_position();
+        let search_control = Some(UciSearchControl {
+            depth: Some(4),
+            ..Default::default()
+        });
+        handle_go(&mut engine, None, search_control);
+    }
+
+    #[test]
+    fn test_position_handling() {
+        let mut engine = get_engine();
+        engine.set_default_position();
+        engine.make_uci_move("e2e4");
+    }
+}
