@@ -20,10 +20,6 @@ impl SearchResult {
         self.value < 0
     }
 
-    pub fn is_mate(&self) -> bool {
-        self.get_mate_in().is_some()
-    }
-
     pub fn get_mate_in(&self) -> Option<u64> {
         let diff = self.value.abs().abs_diff(MATE_VALUE.abs());
 
