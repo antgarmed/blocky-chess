@@ -112,20 +112,24 @@ fn get_number_of_black_queens(position: &Chess) -> usize {
         .count()
 }
 
-fn get_number_of_moves_for_white(position: &Chess) -> usize {
-    if position.turn() == Color::White {
-        position.clone().swap_turn().unwrap().legal_moves().len();
+fn get_number_of_moves_for_color(position: &Chess, color: Color) -> usize {
+    if position.turn() == color {
+        position.legal_moves().len()
+    } else {
+        position
+            .clone()
+            .swap_turn()
+            .map(|position| position.legal_moves().len())
+            .unwrap_or(0)
     }
+}
 
-    position.legal_moves().len()
+fn get_number_of_moves_for_white(position: &Chess) -> usize {
+    get_number_of_moves_for_color(position, Color::White)
 }
 
 fn get_number_of_moves_for_black(position: &Chess) -> usize {
-    if position.turn() == Color::White {
-        position.clone().swap_turn().unwrap().legal_moves().len();
-    }
-
-    position.legal_moves().len()
+    get_number_of_moves_for_color(position, Color::Black)
 }
 
 pub mod material_evaluation;
@@ -146,5 +150,16 @@ mod tests {
         let result = get_number_of_moves_for_white(&position);
 
         assert_eq!(result, 20);
+    }
+
+    #[test]
+    fn test_mobility_is_calculated_for_each_color() {
+        let fen: Fen = "rnbqkbnr/pppppppp/8/8/4P3/8/PPPP1PPP/RNBQKBNR b KQkq - 0 1"
+            .parse()
+            .unwrap();
+        let position: Chess = fen.into_position(CastlingMode::Standard).unwrap();
+
+        assert_eq!(get_number_of_moves_for_black(&position), 20);
+        assert_eq!(get_number_of_moves_for_white(&position), 30);
     }
 }
