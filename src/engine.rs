@@ -1,5 +1,5 @@
 use crate::search::{Search, SearchResult};
-use shakmaty::{fen::Fen, uci::UciMove, CastlingMode, Chess, Position};
+use shakmaty::{fen::Fen, uci::UciMove, CastlingMode, Chess, Color, Position};
 
 const ENGINE_NAME: &str = "Blocky";
 const ENGINE_VERSION: &str = "0.1.0";
@@ -24,6 +24,10 @@ impl Engine {
 
     pub fn get_author(&self) -> String {
         ENGINE_AUTHOR.to_string()
+    }
+
+    pub fn turn(&self) -> Color {
+        self.position.turn()
     }
 
     pub fn set_default_position(&mut self) {

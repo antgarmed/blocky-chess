@@ -3,7 +3,7 @@ use crate::evaluation::material_mobility_evaluation::material_mobility_evaluatio
 use crate::movegen::basic_movegen::basic_movegen;
 use crate::search::alphabeta::AlphaBetaSearch;
 use crate::search::SearchConfig;
-use shakmaty::CastlingMode;
+use shakmaty::{CastlingMode, Color};
 use std::io::{self, BufRead};
 use vampirc_uci::parse_one;
 use vampirc_uci::UciMessage;
@@ -78,6 +78,18 @@ fn get_engine() -> Engine {
     Engine::new(search_algorithm)
 }
 
+fn format_score(search_result: &crate::search::SearchResult, turn: Color) -> String {
+    match search_result.get_mate_in() {
+        Some(mate_in) => {
+            let side_to_move_wins = (turn.is_white() && search_result.is_white_winning())
+                || (turn.is_black() && search_result.is_black_winning());
+            let sign = if side_to_move_wins { "" } else { "-" };
+            format!("mate {}{}", sign, mate_in)
+        }
+        None => format!("cp {}", search_result.value),
+    }
+}
+
 fn handle_go(
     engine: &mut Engine,
     _time_control: Option<UciTimeControl>,
@@ -92,7 +104,7 @@ fn handle_go(
 
     match search_result.principal_variation.first() {
         Some(best_move) => {
-            let score = search_result.value;
+            let score = format_score(&search_result, engine.turn());
             let pv = search_result
                 .principal_variation
                 .iter()
@@ -100,7 +112,7 @@ fn handle_go(
                 .collect::<Vec<String>>()
                 .join(" ");
 
-            println!("info depth {} score cp {} pv {}", depth, score, pv);
+            println!("info depth {} score {} pv {}", depth, score, pv);
             println!("bestmove {}", best_move.to_uci(CastlingMode::Standard));
         }
         None => {
@@ -113,6 +125,8 @@ fn handle_go(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::search::SearchResult;
+    use crate::utils::consts::MATE_VALUE;
     use vampirc_uci::UciSearchControl;
 
     #[test]
@@ -149,5 +163,22 @@ mod tests {
         let mut engine = get_engine();
         engine.set_default_position();
         engine.make_uci_move("e2e4");
+    }
+
+    #[test]
+    fn test_format_score_mate_is_relative_to_side_to_move() {
+        let white_wins = SearchResult {
+            value: MATE_VALUE - 1,
+            principal_variation: Vec::new(),
+        };
+        let black_wins = SearchResult {
+            value: 1 - MATE_VALUE,
+            principal_variation: Vec::new(),
+        };
+
+        assert_eq!(format_score(&white_wins, Color::White), "mate 1");
+        assert_eq!(format_score(&white_wins, Color::Black), "mate -1");
+        assert_eq!(format_score(&black_wins, Color::Black), "mate 1");
+        assert_eq!(format_score(&black_wins, Color::White), "mate -1");
     }
 }

@@ -31,7 +31,7 @@ impl SearchResult {
             return None;
         }
 
-        let mate_in = diff / 2;
+        let mate_in = (diff + 1) / 2;
 
         Some(mate_in)
     }
@@ -47,3 +47,18 @@ pub trait Search {
 }
 
 pub mod alphabeta;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_get_mate_in_rounds_up_for_a_one_ply_mate() {
+        let result = SearchResult {
+            value: MATE_VALUE - 1,
+            principal_variation: Vec::new(),
+        };
+
+        assert_eq!(result.get_mate_in(), Some(1));
+    }
+}

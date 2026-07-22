@@ -1,6 +1,6 @@
 use super::{Search, SearchConfig, SearchResult, Value};
 use crate::utils::consts::MATE_VALUE;
-use shakmaty::{Chess, Color, Position};
+use shakmaty::{Chess, Color, Outcome, Position};
 
 const INITIAL_ALPHA: Value = Value::MIN;
 const INITIAL_BETA: Value = Value::MAX;
@@ -23,6 +23,7 @@ impl Search for AlphaBetaSearch {
             INITIAL_ALPHA,
             INITIAL_BETA,
             initial_position.turn(),
+            0,
         )
     }
 }
@@ -35,10 +36,20 @@ impl AlphaBetaSearch {
         mut alpha: Value,
         mut beta: Value,
         color_to_maximize: Color,
+        ply_from_root: usize,
     ) -> SearchResult {
         if depth == 0 || position.outcome().is_some() {
+            let value = match position.outcome() {
+                Some(Outcome::Decisive { winner }) if winner.is_white() => {
+                    MATE_VALUE - ply_from_root as i64
+                }
+                Some(Outcome::Decisive { .. }) => ply_from_root as i64 - MATE_VALUE,
+                Some(Outcome::Draw) => 0,
+                _ => (self.config.evaluation_function)(position),
+            };
+
             return SearchResult {
-                value: (self.config.evaluation_function)(position),
+                value,
                 principal_variation: Vec::new(),
             };
         }
@@ -53,14 +64,14 @@ impl AlphaBetaSearch {
 
             for m in moves {
                 let child_node = position.clone().play(&m).unwrap();
-                let mut child_result =
-                    self.alpha_beta_search(&child_node, depth - 1, alpha, beta, Color::Black);
-
-                if child_result.is_mate() && child_result.is_white_winning() {
-                    child_result.value = MATE_VALUE - depth as i64;
-                } else if child_result.is_mate() && child_result.is_black_winning() {
-                    child_result.value = depth as i64 - MATE_VALUE;
-                }
+                let child_result = self.alpha_beta_search(
+                    &child_node,
+                    depth - 1,
+                    alpha,
+                    beta,
+                    Color::Black,
+                    ply_from_root + 1,
+                );
 
                 if child_result.value > best_search_result.value {
                     best_search_result = child_result;
@@ -83,14 +94,14 @@ impl AlphaBetaSearch {
 
             for m in moves {
                 let child_node = position.clone().play(&m).unwrap();
-                let mut child_result =
-                    self.alpha_beta_search(&child_node, depth - 1, alpha, beta, Color::White);
-
-                if child_result.is_mate() && child_result.is_white_winning() {
-                    child_result.value = MATE_VALUE - depth as i64;
-                } else if child_result.is_mate() && child_result.is_black_winning() {
-                    child_result.value = depth as i64 - MATE_VALUE;
-                }
+                let child_result = self.alpha_beta_search(
+                    &child_node,
+                    depth - 1,
+                    alpha,
+                    beta,
+                    Color::White,
+                    ply_from_root + 1,
+                );
 
                 if child_result.value < best_search_result.value {
                     best_search_result = child_result;
@@ -141,6 +152,26 @@ mod tests {
         .search(&position, depth);
 
         assert!(!result.principal_variation.is_empty());
+    }
+
+    #[test]
+    fn test_search_reports_mate_in_1_found_before_horizon() {
+        let fen: Fen = "7k/5Q2/6K1/8/8/8/8/8 w - - 0 1".parse().unwrap();
+        let position: Chess = fen.into_position(CastlingMode::Standard).unwrap();
+
+        let result = AlphaBetaSearch {
+            config: BASIC_CONFIG,
+        }
+        .search(&position, 3);
+
+        assert_eq!(result.value, MATE_VALUE - 1);
+        assert_eq!(result.get_mate_in(), Some(1));
+        assert_eq!(
+            result.principal_variation[0]
+                .to_uci(CastlingMode::Standard)
+                .to_string(),
+            "f7g7"
+        );
     }
 
     #[test]
