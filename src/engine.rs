@@ -1,5 +1,5 @@
 use crate::search::{Search, SearchResult};
-use shakmaty::{fen::Fen, uci::Uci, CastlingMode, Chess, Position};
+use shakmaty::{fen::Fen, uci::UciMove, CastlingMode, Chess, Position};
 
 const ENGINE_NAME: &str = "Blocky";
 const ENGINE_VERSION: &str = "0.1.0";
@@ -36,7 +36,7 @@ impl Engine {
     }
 
     pub fn make_uci_move(&mut self, uci_move: &str) {
-        let uci: Uci = uci_move.parse().unwrap();
+        let uci: UciMove = uci_move.parse().unwrap();
         let m = uci.to_move(&self.position).unwrap();
         self.position.play_unchecked(&m);
     }

@@ -74,7 +74,7 @@ impl AlphaBetaSearch {
                 }
             }
 
-            return best_search_result;
+            best_search_result
         } else {
             let mut best_search_result = SearchResult {
                 value: Value::MAX,
@@ -104,7 +104,7 @@ impl AlphaBetaSearch {
                 }
             }
 
-            return best_search_result;
+            best_search_result
         }
     }
 }
@@ -112,10 +112,18 @@ impl AlphaBetaSearch {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::evaluation::zero_evaluation::zero_evaluation;
     use crate::movegen::basic_movegen::basic_movegen;
+    use crate::utils::consts::MATE_VALUE;
     use shakmaty::fen::Fen;
-    use shakmaty::CastlingMode;
+    use shakmaty::{CastlingMode, Outcome};
+
+    fn zero_evaluation(position: &Chess) -> Value {
+        match position.outcome() {
+            Some(Outcome::Decisive { winner }) if winner.is_white() => MATE_VALUE,
+            Some(Outcome::Decisive { .. }) => -MATE_VALUE,
+            Some(Outcome::Draw) | None => 0,
+        }
+    }
 
     const BASIC_CONFIG: SearchConfig = SearchConfig {
         evaluation_function: zero_evaluation,
@@ -132,7 +140,7 @@ mod tests {
         }
         .search(&position, depth);
 
-        assert!(result.principal_variation.len() >= 1);
+        assert!(!result.principal_variation.is_empty());
     }
 
     #[test]

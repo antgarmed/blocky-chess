@@ -4,13 +4,11 @@ use crate::{search::Value, utils::consts::MATE_VALUE};
 
 fn evaluate_outcome(outcome: &Outcome) -> Value {
     match outcome {
-        Outcome::Decisive { winner } => {
-            return match winner {
-                Color::White => MATE_VALUE,
-                Color::Black => -MATE_VALUE,
-            };
-        }
-        Outcome::Draw => return 0,
+        Outcome::Decisive { winner } => match winner {
+            Color::White => MATE_VALUE,
+            Color::Black => -MATE_VALUE,
+        },
+        Outcome::Draw => 0,
     }
 }
 
@@ -132,8 +130,6 @@ fn get_number_of_moves_for_black(position: &Chess) -> usize {
 
 pub mod material_evaluation;
 pub mod material_mobility_evaluation;
-pub mod zero_evaluation;
-
 #[cfg(test)]
 mod tests {
     use super::*;

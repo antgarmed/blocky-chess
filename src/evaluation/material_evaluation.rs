@@ -19,7 +19,7 @@ pub fn material_evaluation(position: &Chess) -> Value {
         return evaluate_outcome(&outcome);
     }
 
-    return QUEEN_VALUE
+    QUEEN_VALUE
         * (get_number_of_white_queens(position) as i64
             - get_number_of_black_queens(position) as i64)
         + ROOK_VALUE
@@ -33,5 +33,5 @@ pub fn material_evaluation(position: &Chess) -> Value {
                 - get_number_of_black_knights(position) as i64)
         + PAWN_VALUE
             * (get_number_of_white_pawns(position) as i64
-                - get_number_of_black_pawns(position) as i64);
+                - get_number_of_black_pawns(position) as i64)
 }

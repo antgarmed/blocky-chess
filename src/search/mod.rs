@@ -33,17 +33,13 @@ impl SearchResult {
 
         let mate_in = diff / 2;
 
-        return Some(mate_in);
+        Some(mate_in)
     }
 }
 
 pub struct SearchConfig {
     pub evaluation_function: fn(&Chess) -> Value,
     pub move_generator: fn(&Chess) -> MoveList,
-}
-
-pub trait SearchFactory {
-    fn build(&self, config: SearchConfig) -> Box<dyn Search>;
 }
 
 pub trait Search {

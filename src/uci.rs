@@ -101,10 +101,7 @@ fn handle_go(
                 .join(" ");
 
             println!("info depth {} score cp {} pv {}", depth, score, pv);
-            println!(
-                "bestmove {}",
-                best_move.to_uci(CastlingMode::Standard).to_string()
-            );
+            println!("bestmove {}", best_move.to_uci(CastlingMode::Standard));
         }
         None => {
             println!("info string No legal moves found");
