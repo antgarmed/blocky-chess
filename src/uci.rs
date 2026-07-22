@@ -79,13 +79,21 @@ where
                 moves,
             } => {
                 stop_active(&mut active_search);
-                if startpos {
-                    engine.set_default_position();
-                } else if let Some(fen) = fen {
-                    engine.set_position_from_fen(&fen.to_string());
-                }
-                for chess_move in moves {
-                    engine.make_uci_move(&chess_move.to_string());
+                let fen = fen.map(|fen| fen.to_string());
+                let moves = moves
+                    .into_iter()
+                    .map(|chess_move| chess_move.to_string())
+                    .collect::<Vec<_>>();
+                let result = if startpos {
+                    engine.set_uci_position(None, &moves)
+                } else if let Some(fen) = fen.as_deref() {
+                    engine.set_uci_position(Some(fen), &moves)
+                } else {
+                    eprintln!("Ignoring position command without startpos or FEN");
+                    continue;
+                };
+                if let Err(error) = result {
+                    eprintln!("Ignoring invalid position command: {error}");
                 }
             }
             UciMessage::Go {
@@ -302,10 +310,44 @@ mod tests {
     #[test]
     fn engine_applies_uci_move_and_changes_turn() {
         let mut engine = get_engine();
-        engine.set_default_position();
-        engine.make_uci_move("e2e4");
+        engine.set_uci_position(None, ["e2e4"]).unwrap();
 
         assert_eq!(engine.turn(), Color::Black);
+    }
+
+    #[test]
+    fn invalid_position_update_preserves_previous_position() {
+        let mut engine = get_engine();
+        engine.set_uci_position(None, ["e2e4"]).unwrap();
+        let previous_position = engine.search_snapshot().0;
+
+        assert!(engine.set_uci_position(None, ["e2e5"]).is_err());
+        assert_eq!(engine.search_snapshot().0, previous_position);
+    }
+
+    #[test]
+    fn engine_rejects_invalid_fen_and_malformed_promotion() {
+        let mut engine = get_engine();
+
+        assert!(engine
+            .set_uci_position(Some("not-a-fen"), std::iter::empty::<&str>())
+            .is_err());
+        assert!(engine.set_uci_position(None, ["e7e8x"]).is_err());
+    }
+
+    #[test]
+    fn invalid_position_commands_do_not_terminate_uci_session() {
+        let commands = [
+            "position fen 8/8/8/8/8/8/8/8 w - - 0 1",
+            "position startpos moves e2e5",
+            "position startpos moves e7e8x",
+            "position startpos moves e2e4 e7e5 e1e3",
+        ];
+
+        for command in commands {
+            let output = run_commands(&format!("{command}\nisready\nquit\n"));
+            assert_eq!(output, "readyok\n", "failed for command: {command}");
+        }
     }
 
     #[test]
