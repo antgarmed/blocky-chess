@@ -43,7 +43,6 @@ where
     let mut engine = get_engine();
     let mut active_search: Option<ActiveSearch> = None;
 
-    write_line(&output, engine.get_full_name())?;
     for line in reader.lines() {
         let line = match line {
             Ok(line) => line,
@@ -59,6 +58,13 @@ where
                     &output,
                     UciMessage::Id {
                         name: Some(engine.get_full_name()),
+                        author: None,
+                    },
+                )?;
+                write_line(
+                    &output,
+                    UciMessage::Id {
+                        name: None,
                         author: Some(engine.get_author()),
                     },
                 )?;
@@ -205,7 +211,8 @@ fn write_line<W: Write>(output: &Arc<Mutex<W>>, line: impl Display) -> io::Resul
     let mut output = output
         .lock()
         .map_err(|_| io::Error::other("UCI output lock poisoned"))?;
-    writeln!(output, "{line}")
+    writeln!(output, "{line}")?;
+    output.flush()
 }
 
 #[cfg(test)]
@@ -213,6 +220,24 @@ mod tests {
     use super::*;
     use crate::utils::consts::MATE_VALUE;
     use std::io::Cursor;
+
+    #[derive(Default)]
+    struct FlushTrackingWriter {
+        bytes: Vec<u8>,
+        flushes: usize,
+    }
+
+    impl Write for FlushTrackingWriter {
+        fn write(&mut self, buffer: &[u8]) -> io::Result<usize> {
+            self.bytes.extend_from_slice(buffer);
+            Ok(buffer.len())
+        }
+
+        fn flush(&mut self) -> io::Result<()> {
+            self.flushes += 1;
+            Ok(())
+        }
+    }
 
     fn run_commands(commands: &str) -> String {
         let output = Arc::new(Mutex::new(Vec::new()));
@@ -226,6 +251,24 @@ mod tests {
         let engine = get_engine();
         assert!(!engine.get_full_name().is_empty());
         assert!(!engine.get_author().is_empty());
+    }
+
+    #[test]
+    fn engine_is_silent_until_uci_command() {
+        assert!(run_commands("quit\n").is_empty());
+    }
+
+    #[test]
+    fn protocol_responses_are_flushed() {
+        let output = Arc::new(Mutex::new(FlushTrackingWriter::default()));
+        run_uci(Cursor::new("uci\nisready\nquit\n"), Arc::clone(&output)).unwrap();
+        let output = output.lock().unwrap();
+
+        assert_eq!(output.flushes, 4);
+        assert_eq!(
+            String::from_utf8(output.bytes.clone()).unwrap(),
+            "id name Blocky 0.1.0\nid author antgarmed\nuciok\nreadyok\n"
+        );
     }
 
     #[test]
