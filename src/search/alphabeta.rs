@@ -1,9 +1,18 @@
 use super::{Search, SearchConfig, SearchResult, Value};
 use crate::utils::consts::MATE_VALUE;
 use shakmaty::{Chess, Color, Outcome, Position};
+use std::sync::atomic::{AtomicBool, Ordering};
 
 const INITIAL_ALPHA: Value = Value::MIN;
 const INITIAL_BETA: Value = Value::MAX;
+
+#[derive(Clone, Copy)]
+struct SearchState {
+    alpha: Value,
+    beta: Value,
+    color_to_maximize: Color,
+    ply_from_root: usize,
+}
 
 pub struct AlphaBetaSearch {
     pub config: SearchConfig,
@@ -16,107 +25,90 @@ impl AlphaBetaSearch {
 }
 
 impl Search for AlphaBetaSearch {
-    fn search(&self, initial_position: &Chess, depth: usize) -> SearchResult {
-        self.alpha_beta_search(
+    fn search_with_stop(
+        &self,
+        initial_position: &Chess,
+        depth: usize,
+        stop: &AtomicBool,
+    ) -> Option<(usize, SearchResult)> {
+        self.alpha_beta_search_with_stop(
             initial_position,
             depth,
-            INITIAL_ALPHA,
-            INITIAL_BETA,
-            initial_position.turn(),
-            0,
+            SearchState {
+                alpha: INITIAL_ALPHA,
+                beta: INITIAL_BETA,
+                color_to_maximize: initial_position.turn(),
+                ply_from_root: 0,
+            },
+            stop,
         )
+        .map(|result| (depth, result))
     }
 }
 
 impl AlphaBetaSearch {
-    fn alpha_beta_search(
+    fn alpha_beta_search_with_stop(
         &self,
         position: &Chess,
         depth: usize,
-        mut alpha: Value,
-        mut beta: Value,
-        color_to_maximize: Color,
-        ply_from_root: usize,
-    ) -> SearchResult {
+        mut state: SearchState,
+        stop: &AtomicBool,
+    ) -> Option<SearchResult> {
+        if stop.load(Ordering::Relaxed) {
+            return None;
+        }
         if depth == 0 || position.outcome().is_some() {
             let value = match position.outcome() {
                 Some(Outcome::Decisive { winner }) if winner.is_white() => {
-                    MATE_VALUE - ply_from_root as i64
+                    MATE_VALUE - state.ply_from_root as i64
                 }
-                Some(Outcome::Decisive { .. }) => ply_from_root as i64 - MATE_VALUE,
+                Some(Outcome::Decisive { .. }) => state.ply_from_root as i64 - MATE_VALUE,
                 Some(Outcome::Draw) => 0,
                 _ => (self.config.evaluation_function)(position),
             };
-
-            return SearchResult {
+            return Some(SearchResult {
                 value,
                 principal_variation: Vec::new(),
-            };
+            });
         }
 
-        let moves = (self.config.move_generator)(position);
-
-        if color_to_maximize.is_white() {
-            let mut best_search_result = SearchResult {
-                value: Value::MIN,
-                principal_variation: Vec::new(),
-            };
-
-            for m in moves {
-                let child_node = position.clone().play(&m).unwrap();
-                let child_result = self.alpha_beta_search(
-                    &child_node,
-                    depth - 1,
-                    alpha,
-                    beta,
-                    Color::Black,
-                    ply_from_root + 1,
-                );
-
-                if child_result.value > best_search_result.value {
-                    best_search_result = child_result;
-                    best_search_result.principal_variation.insert(0, m);
-                }
-
-                alpha = alpha.max(best_search_result.value);
-
-                if beta <= alpha {
-                    break;
-                }
+        let maximizing = state.color_to_maximize.is_white();
+        let mut best = SearchResult {
+            value: if maximizing { Value::MIN } else { Value::MAX },
+            principal_variation: Vec::new(),
+        };
+        for m in (self.config.move_generator)(position) {
+            if stop.load(Ordering::Relaxed) {
+                return None;
             }
-
-            best_search_result
-        } else {
-            let mut best_search_result = SearchResult {
-                value: Value::MAX,
-                principal_variation: Vec::new(),
-            };
-
-            for m in moves {
-                let child_node = position.clone().play(&m).unwrap();
-                let child_result = self.alpha_beta_search(
-                    &child_node,
-                    depth - 1,
-                    alpha,
-                    beta,
-                    Color::White,
-                    ply_from_root + 1,
-                );
-
-                if child_result.value < best_search_result.value {
-                    best_search_result = child_result;
-                    best_search_result.principal_variation.insert(0, m);
-                }
-
-                beta = beta.min(best_search_result.value);
-
-                if beta <= alpha {
-                    break;
-                }
+            let child = position.clone().play(&m).unwrap();
+            let child_result = self.alpha_beta_search_with_stop(
+                &child,
+                depth - 1,
+                SearchState {
+                    alpha: state.alpha,
+                    beta: state.beta,
+                    color_to_maximize: !state.color_to_maximize,
+                    ply_from_root: state.ply_from_root + 1,
+                },
+                stop,
+            )?;
+            if (maximizing && child_result.value > best.value)
+                || (!maximizing && child_result.value < best.value)
+            {
+                best = child_result;
+                best.principal_variation.insert(0, m);
             }
-
-            best_search_result
+            if maximizing {
+                state.alpha = state.alpha.max(best.value);
+            } else {
+                state.beta = state.beta.min(best.value);
+            }
+            if state.beta <= state.alpha {
+                break;
+            }
         }
+        Some(best)
     }
 }
 
@@ -127,6 +119,7 @@ mod tests {
     use crate::utils::consts::MATE_VALUE;
     use shakmaty::fen::Fen;
     use shakmaty::{CastlingMode, Outcome};
+    use std::sync::atomic::AtomicBool;
 
     fn zero_evaluation(position: &Chess) -> Value {
         match position.outcome() {
@@ -141,15 +134,21 @@ mod tests {
         move_generator: basic_movegen,
     };
 
+    fn search(position: &Chess, depth: usize) -> SearchResult {
+        AlphaBetaSearch {
+            config: BASIC_CONFIG,
+        }
+        .search_with_stop(position, depth, &AtomicBool::new(false))
+        .expect("search without cancellation must complete")
+        .1
+    }
+
     #[test]
     fn test_search_returns_result_when_depth_is_1() {
         let position = Chess::default();
         let depth = 1;
 
-        let result = AlphaBetaSearch {
-            config: BASIC_CONFIG,
-        }
-        .search(&position, depth);
+        let result = search(&position, depth);
 
         assert!(!result.principal_variation.is_empty());
     }
@@ -159,10 +158,7 @@ mod tests {
         let fen: Fen = "7k/5Q2/6K1/8/8/8/8/8 w - - 0 1".parse().unwrap();
         let position: Chess = fen.into_position(CastlingMode::Standard).unwrap();
 
-        let result = AlphaBetaSearch {
-            config: BASIC_CONFIG,
-        }
-        .search(&position, 3);
+        let result = search(&position, 3);
 
         assert_eq!(result.value, MATE_VALUE - 1);
         assert_eq!(result.get_mate_in(), Some(1));
@@ -182,10 +178,7 @@ mod tests {
         let position: Chess = fen.into_position(CastlingMode::Standard).unwrap();
         let depth = 4;
 
-        let result = AlphaBetaSearch {
-            config: BASIC_CONFIG,
-        }
-        .search(&position, depth);
+        let result = search(&position, depth);
 
         assert_eq!(result.get_mate_in(), Some(2));
         assert_eq!(
@@ -216,10 +209,7 @@ mod tests {
         let position: Chess = fen.into_position(CastlingMode::Standard).unwrap();
         let depth = 4;
 
-        let result = AlphaBetaSearch {
-            config: BASIC_CONFIG,
-        }
-        .search(&position, depth);
+        let result = search(&position, depth);
 
         assert_eq!(result.get_mate_in(), Some(2));
         assert_eq!(
@@ -250,10 +240,7 @@ mod tests {
         let position: Chess = fen.into_position(CastlingMode::Standard).unwrap();
         let depth = 6;
 
-        let result = AlphaBetaSearch {
-            config: BASIC_CONFIG,
-        }
-        .search(&position, depth);
+        let result = search(&position, depth);
 
         assert_eq!(result.get_mate_in(), Some(3));
     }
@@ -266,10 +253,7 @@ mod tests {
         let position: Chess = fen.into_position(CastlingMode::Standard).unwrap();
         let depth = 6;
 
-        let result = AlphaBetaSearch {
-            config: BASIC_CONFIG,
-        }
-        .search(&position, depth);
+        let result = search(&position, depth);
 
         assert_eq!(result.get_mate_in(), Some(3));
     }

@@ -1,9 +1,11 @@
 use shakmaty::{Chess, Move, MoveList};
+use std::sync::atomic::AtomicBool;
 
 use crate::utils::consts::MATE_VALUE;
 
 pub type Value = i64;
 
+#[derive(Clone)]
 pub struct SearchResult {
     pub value: Value,
     pub principal_variation: Vec<Move>,
@@ -33,15 +35,22 @@ impl SearchResult {
     }
 }
 
+#[derive(Clone)]
 pub struct SearchConfig {
     pub evaluation_function: fn(&Chess) -> Value,
     pub move_generator: fn(&Chess) -> MoveList,
 }
 
-pub trait Search {
-    fn search(&self, initial_position: &Chess, depth: usize) -> SearchResult;
+pub trait Search: Send + Sync {
+    fn search_with_stop(
+        &self,
+        initial_position: &Chess,
+        depth: usize,
+        stop: &AtomicBool,
+    ) -> Option<(usize, SearchResult)>;
 }
 
+pub mod alpha_beta_iterative_deepening;
 pub mod alphabeta;
 
 #[cfg(test)]

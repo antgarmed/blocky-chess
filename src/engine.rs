@@ -1,5 +1,6 @@
-use crate::search::{Search, SearchResult};
+use crate::search::Search;
 use shakmaty::{fen::Fen, uci::UciMove, CastlingMode, Chess, Color, Position};
+use std::sync::Arc;
 
 const ENGINE_NAME: &str = "Blocky";
 const ENGINE_VERSION: &str = "0.1.0";
@@ -7,14 +8,14 @@ const ENGINE_AUTHOR: &str = "antgarmed";
 
 pub struct Engine {
     position: Chess,
-    search_algorithm: Box<dyn Search>,
+    search_algorithm: Arc<dyn Search>,
 }
 
 impl Engine {
     pub fn new(search: Box<dyn Search>) -> Self {
         Self {
             position: Chess::default(),
-            search_algorithm: search,
+            search_algorithm: Arc::from(search),
         }
     }
 
@@ -45,7 +46,11 @@ impl Engine {
         self.position.play_unchecked(&m);
     }
 
-    pub fn go(&self, depth: usize) -> SearchResult {
-        self.search_algorithm.search(&self.position, depth)
+    pub fn search_snapshot(&self) -> (Chess, Arc<dyn Search>, Color) {
+        (
+            self.position.clone(),
+            Arc::clone(&self.search_algorithm),
+            self.turn(),
+        )
     }
 }
