@@ -7,7 +7,7 @@ use super::{
     material_evaluation::material_evaluation,
 };
 
-const MOBILITY_WEIGHT: Value = 1000;
+const MOBILITY_WEIGHT: Value = 10;
 
 pub fn material_mobility_evaluation(position: &Chess) -> Value {
     if let Some(outcome) = position.outcome() {
