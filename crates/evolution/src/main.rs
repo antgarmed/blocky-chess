@@ -1,4 +1,4 @@
 fn main() {
-    let _evaluation_config = blocky_chess::EvaluationConfig::default();
+    let _genome = blocky_evolution::Genome::default();
     println!("blocky-evolution is ready to use blocky-chess");
 }
