@@ -107,7 +107,7 @@ impl Engine {
                         uci_move: uci_move.to_owned(),
                         reason: error.to_string(),
                     })?;
-            position.play_unchecked(&chess_move);
+            position.play_unchecked(chess_move);
         }
 
         self.position = position;

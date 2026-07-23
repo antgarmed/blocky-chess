@@ -1,14 +1,14 @@
-use shakmaty::{Chess, Color, MoveList, Outcome, Piece, Position, Role};
+use shakmaty::{Chess, Color, KnownOutcome, MoveList, Outcome, Piece, Position, Role};
 
 use crate::{search::Value, utils::consts::MATE_VALUE};
 
 fn evaluate_outcome(outcome: &Outcome) -> Value {
     match outcome {
-        Outcome::Decisive { winner } => match winner {
+        Outcome::Known(KnownOutcome::Decisive { winner }) => match winner {
             Color::White => MATE_VALUE,
             Color::Black => -MATE_VALUE,
         },
-        Outcome::Draw => 0,
+        Outcome::Known(KnownOutcome::Draw) | Outcome::Unknown => 0,
     }
 }
 

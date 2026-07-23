@@ -15,7 +15,8 @@ const ROOK_VALUE: Value = 500;
 const QUEEN_VALUE: Value = 900;
 
 pub fn material_evaluation(position: &Chess) -> Value {
-    if let Some(outcome) = position.outcome() {
+    let outcome = position.outcome();
+    if outcome.is_known() {
         return evaluate_outcome(&outcome);
     }
 

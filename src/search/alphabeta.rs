@@ -1,6 +1,6 @@
 use super::{Search, SearchConfig, SearchLimits, SearchResult, Value};
 use crate::utils::consts::MATE_VALUE;
-use shakmaty::{Chess, Color, Outcome, Position};
+use shakmaty::{Chess, Color, KnownOutcome, Outcome, Position};
 
 const INITIAL_ALPHA: Value = Value::MIN;
 const INITIAL_BETA: Value = Value::MAX;
@@ -66,13 +66,16 @@ impl AlphaBetaSearch {
         if limits.should_stop() {
             return None;
         }
-        if depth == 0 || position.outcome().is_some() {
-            let value = match position.outcome() {
-                Some(Outcome::Decisive { winner }) if winner.is_white() => {
+        let outcome = position.outcome();
+        if depth == 0 || outcome.is_known() {
+            let value = match outcome {
+                Outcome::Known(KnownOutcome::Decisive { winner }) if winner.is_white() => {
                     MATE_VALUE - state.ply_from_root as i64
                 }
-                Some(Outcome::Decisive { .. }) => state.ply_from_root as i64 - MATE_VALUE,
-                Some(Outcome::Draw) => 0,
+                Outcome::Known(KnownOutcome::Decisive { .. }) => {
+                    state.ply_from_root as i64 - MATE_VALUE
+                }
+                Outcome::Known(KnownOutcome::Draw) => 0,
                 _ => (self.config.evaluation_function)(position),
             };
             return Some(SearchResult {
@@ -90,7 +93,7 @@ impl AlphaBetaSearch {
             if limits.should_stop() {
                 return None;
             }
-            let child = position.clone().play(&m).unwrap();
+            let child = position.clone().play(m).unwrap();
             let child_result = self.alpha_beta_search_with_limits(
                 &child,
                 depth - 1,
@@ -127,14 +130,14 @@ mod tests {
     use crate::movegen::basic_movegen::basic_movegen;
     use crate::utils::consts::MATE_VALUE;
     use shakmaty::fen::Fen;
-    use shakmaty::{CastlingMode, Outcome};
+    use shakmaty::{CastlingMode, KnownOutcome, Outcome};
     use std::sync::atomic::AtomicBool;
 
     fn zero_evaluation(position: &Chess) -> Value {
         match position.outcome() {
-            Some(Outcome::Decisive { winner }) if winner.is_white() => MATE_VALUE,
-            Some(Outcome::Decisive { .. }) => -MATE_VALUE,
-            Some(Outcome::Draw) | None => 0,
+            Outcome::Known(KnownOutcome::Decisive { winner }) if winner.is_white() => MATE_VALUE,
+            Outcome::Known(KnownOutcome::Decisive { .. }) => -MATE_VALUE,
+            Outcome::Known(KnownOutcome::Draw) | Outcome::Unknown => 0,
         }
     }
 

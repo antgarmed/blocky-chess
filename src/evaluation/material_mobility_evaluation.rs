@@ -16,7 +16,8 @@ const QUEEN_MOBILITY_WEIGHT_HUNDREDTHS: Value = 10;
 const KING_MOBILITY_WEIGHT_HUNDREDTHS: Value = 5;
 
 pub fn material_mobility_evaluation(position: &Chess) -> Value {
-    if let Some(outcome) = position.outcome() {
+    let outcome = position.outcome();
+    if outcome.is_known() {
         return evaluate_outcome(&outcome);
     }
 
