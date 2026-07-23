@@ -1,7 +1,5 @@
 use crate::engine::Engine;
-use crate::evaluation::material_mobility_evaluation::{
-    material_mobility_evaluation_with_config, MaterialMobilityConfig,
-};
+use crate::evaluation::{main_evaluation::main_evaluation, EvaluationConfig};
 use crate::movegen::basic_movegen::basic_movegen;
 use crate::search::alpha_beta_iterative_deepening::AlphaBetaIterativeDeepeningSearch;
 use crate::search::{SearchConfig, SearchLimits, SearchResult};
@@ -42,7 +40,7 @@ where
     W: Write + Send + 'static,
 {
     let mut engine = get_engine();
-    let mut evaluation_config = MaterialMobilityConfig::default();
+    let mut evaluation_config = EvaluationConfig::default();
     let mut active_search: Option<ActiveSearch> = None;
 
     for line in reader.lines() {
@@ -137,17 +135,17 @@ fn stop_active(active: &mut Option<ActiveSearch>) {
 }
 
 fn get_engine() -> Engine {
-    let config = MaterialMobilityConfig::default();
+    let config = EvaluationConfig::default();
     Engine::new(Box::new(AlphaBetaIterativeDeepeningSearch::new(
         SearchConfig {
-            evaluation_function: material_mobility_evaluation_with_config,
+            evaluation_function: main_evaluation,
             move_generator: basic_movegen,
             evaluation_config: Arc::new(std::sync::RwLock::new(config)),
         },
     )))
 }
 
-fn evaluation_options(config: &MaterialMobilityConfig) -> [UciOptionConfig; 7] {
+fn evaluation_options(config: &EvaluationConfig) -> [UciOptionConfig; 8] {
     [
         spin_option("MobilityWeight", config.mobility_weight),
         spin_option("PawnMobilityWeight", config.pawn_mobility_weight),
@@ -156,6 +154,7 @@ fn evaluation_options(config: &MaterialMobilityConfig) -> [UciOptionConfig; 7] {
         spin_option("RookMobilityWeight", config.rook_mobility_weight),
         spin_option("QueenMobilityWeight", config.queen_mobility_weight),
         spin_option("KingMobilityWeight", config.king_mobility_weight),
+        spin_option("KingSafetyWeight", config.king_safety_weight),
     ]
 }
 
@@ -168,11 +167,7 @@ fn spin_option(name: &str, default: i64) -> UciOptionConfig {
     }
 }
 
-fn apply_evaluation_option(
-    name: &str,
-    value: Option<&str>,
-    config: &mut MaterialMobilityConfig,
-) -> bool {
+fn apply_evaluation_option(name: &str, value: Option<&str>, config: &mut EvaluationConfig) -> bool {
     let Some(value) = value.and_then(|value| value.parse::<i64>().ok()) else {
         return false;
     };
@@ -194,6 +189,7 @@ fn apply_evaluation_option(
             &mut config.queen_mobility_weight
         }
         name if name.eq_ignore_ascii_case("KingMobilityWeight") => &mut config.king_mobility_weight,
+        name if name.eq_ignore_ascii_case("KingSafetyWeight") => &mut config.king_safety_weight,
         _ => return false,
     };
     *target = value;
@@ -390,10 +386,10 @@ mod tests {
         run_uci(Cursor::new("uci\nisready\nquit\n"), Arc::clone(&output)).unwrap();
         let output = output.lock().unwrap();
 
-        assert_eq!(output.flushes, 11);
+        assert_eq!(output.flushes, 12);
         assert_eq!(
             String::from_utf8(output.bytes.clone()).unwrap(),
-            "id name Blocky 0.1.0\nid author antgarmed\noption name MobilityWeight type spin default 10 min 0 max 100\noption name PawnMobilityWeight type spin default 5 min 0 max 100\noption name KnightMobilityWeight type spin default 30 min 0 max 100\noption name BishopMobilityWeight type spin default 30 min 0 max 100\noption name RookMobilityWeight type spin default 20 min 0 max 100\noption name QueenMobilityWeight type spin default 10 min 0 max 100\noption name KingMobilityWeight type spin default 5 min 0 max 100\nuciok\nreadyok\n"
+            "id name Blocky 0.1.0\nid author antgarmed\noption name MobilityWeight type spin default 10 min 0 max 100\noption name PawnMobilityWeight type spin default 5 min 0 max 100\noption name KnightMobilityWeight type spin default 30 min 0 max 100\noption name BishopMobilityWeight type spin default 30 min 0 max 100\noption name RookMobilityWeight type spin default 20 min 0 max 100\noption name QueenMobilityWeight type spin default 10 min 0 max 100\noption name KingMobilityWeight type spin default 5 min 0 max 100\noption name KingSafetyWeight type spin default 50 min 0 max 100\nuciok\nreadyok\n"
         );
     }
 
@@ -408,7 +404,7 @@ mod tests {
 
     #[test]
     fn invalid_evaluation_option_is_ignored() {
-        let mut config = MaterialMobilityConfig::default();
+        let mut config = EvaluationConfig::default();
 
         assert!(!apply_evaluation_option(
             "MobilityWeight",

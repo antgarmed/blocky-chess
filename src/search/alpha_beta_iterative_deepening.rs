@@ -1,5 +1,5 @@
 use super::{alphabeta::AlphaBetaSearch, Search, SearchConfig, SearchLimits, SearchResult};
-use crate::evaluation::material_mobility_evaluation::MaterialMobilityConfig;
+use crate::evaluation::EvaluationConfig;
 use shakmaty::Chess;
 
 pub struct AlphaBetaIterativeDeepeningSearch {
@@ -15,7 +15,7 @@ impl AlphaBetaIterativeDeepeningSearch {
 }
 
 impl Search for AlphaBetaIterativeDeepeningSearch {
-    fn set_evaluation_config(&self, config: MaterialMobilityConfig) {
+    fn set_evaluation_config(&self, config: EvaluationConfig) {
         self.alpha_beta_search.set_evaluation_config(config);
     }
 
@@ -52,7 +52,7 @@ mod tests {
     use std::sync::{Arc, RwLock};
     use std::time::{Duration, Instant};
 
-    fn zero(_: &Chess, _: &MaterialMobilityConfig) -> i64 {
+    fn zero(_: &Chess, _: &EvaluationConfig) -> i64 {
         0
     }
 
@@ -61,7 +61,7 @@ mod tests {
         let search = AlphaBetaIterativeDeepeningSearch::new(SearchConfig {
             evaluation_function: zero,
             move_generator: basic_movegen,
-            evaluation_config: Arc::new(RwLock::new(MaterialMobilityConfig::default())),
+            evaluation_config: Arc::new(RwLock::new(EvaluationConfig::default())),
         });
         let stop = AtomicBool::new(true);
         let limits = SearchLimits {
@@ -80,7 +80,7 @@ mod tests {
         let search = AlphaBetaIterativeDeepeningSearch::new(SearchConfig {
             evaluation_function: zero,
             move_generator: basic_movegen,
-            evaluation_config: Arc::new(RwLock::new(MaterialMobilityConfig::default())),
+            evaluation_config: Arc::new(RwLock::new(EvaluationConfig::default())),
         });
         let stop = AtomicBool::new(false);
         let limits = SearchLimits {
@@ -99,7 +99,7 @@ mod tests {
         let search = AlphaBetaIterativeDeepeningSearch::new(SearchConfig {
             evaluation_function: zero,
             move_generator: basic_movegen,
-            evaluation_config: Arc::new(RwLock::new(MaterialMobilityConfig::default())),
+            evaluation_config: Arc::new(RwLock::new(EvaluationConfig::default())),
         });
         let stop = AtomicBool::new(false);
         let limits = SearchLimits {

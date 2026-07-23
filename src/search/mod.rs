@@ -2,7 +2,7 @@ use shakmaty::{Chess, Move, MoveList};
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
-use crate::evaluation::material_mobility_evaluation::MaterialMobilityConfig;
+use crate::evaluation::EvaluationConfig;
 use crate::utils::consts::MATE_VALUE;
 use std::sync::{Arc, RwLock};
 
@@ -40,9 +40,9 @@ impl SearchResult {
 
 #[derive(Clone)]
 pub struct SearchConfig {
-    pub evaluation_function: fn(&Chess, &MaterialMobilityConfig) -> Value,
+    pub evaluation_function: fn(&Chess, &EvaluationConfig) -> Value,
     pub move_generator: fn(&Chess) -> MoveList,
-    pub evaluation_config: Arc<RwLock<MaterialMobilityConfig>>,
+    pub evaluation_config: Arc<RwLock<EvaluationConfig>>,
 }
 
 pub struct SearchLimits<'a> {
@@ -61,7 +61,7 @@ impl SearchLimits<'_> {
 }
 
 pub trait Search: Send + Sync {
-    fn set_evaluation_config(&self, config: MaterialMobilityConfig);
+    fn set_evaluation_config(&self, config: EvaluationConfig);
 
     fn search_with_limits(
         &self,

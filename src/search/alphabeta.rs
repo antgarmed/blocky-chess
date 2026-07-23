@@ -1,5 +1,5 @@
 use super::{Search, SearchConfig, SearchLimits, SearchResult, Value};
-use crate::evaluation::material_mobility_evaluation::MaterialMobilityConfig;
+use crate::evaluation::EvaluationConfig;
 use crate::utils::consts::MATE_VALUE;
 use shakmaty::{Chess, Color, KnownOutcome, Outcome, Position};
 
@@ -25,7 +25,7 @@ impl AlphaBetaSearch {
 }
 
 impl Search for AlphaBetaSearch {
-    fn set_evaluation_config(&self, config: MaterialMobilityConfig) {
+    fn set_evaluation_config(&self, config: EvaluationConfig) {
         *self.config.evaluation_config.write().unwrap() = config;
     }
 
@@ -141,7 +141,7 @@ mod tests {
     use shakmaty::{CastlingMode, KnownOutcome, Outcome};
     use std::sync::atomic::AtomicBool;
 
-    fn zero_evaluation(position: &Chess, _: &MaterialMobilityConfig) -> Value {
+    fn zero_evaluation(position: &Chess, _: &EvaluationConfig) -> Value {
         match position.outcome() {
             Outcome::Known(KnownOutcome::Decisive { winner }) if winner.is_white() => MATE_VALUE,
             Outcome::Known(KnownOutcome::Decisive { .. }) => -MATE_VALUE,
@@ -154,7 +154,7 @@ mod tests {
             evaluation_function: zero_evaluation,
             move_generator: basic_movegen,
             evaluation_config: std::sync::Arc::new(std::sync::RwLock::new(
-                MaterialMobilityConfig::default(),
+                EvaluationConfig::default(),
             )),
         }
     }

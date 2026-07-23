@@ -1,4 +1,4 @@
-use crate::evaluation::material_mobility_evaluation::MaterialMobilityConfig;
+use crate::evaluation::EvaluationConfig;
 use crate::search::Search;
 use shakmaty::{fen::Fen, uci::UciMove, CastlingMode, Chess, Color, Position};
 use std::error::Error;
@@ -59,7 +59,7 @@ impl Engine {
         ENGINE_AUTHOR.to_string()
     }
 
-    pub fn set_evaluation_config(&self, config: MaterialMobilityConfig) {
+    pub fn set_evaluation_config(&self, config: EvaluationConfig) {
         self.search_algorithm.set_evaluation_config(config);
     }
 

@@ -2,6 +2,33 @@ use shakmaty::{Chess, Color, KnownOutcome, MoveList, Outcome, Piece, Position, R
 
 use crate::{search::Value, utils::consts::MATE_VALUE};
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct EvaluationConfig {
+    pub mobility_weight: Value,
+    pub pawn_mobility_weight: Value,
+    pub knight_mobility_weight: Value,
+    pub bishop_mobility_weight: Value,
+    pub rook_mobility_weight: Value,
+    pub queen_mobility_weight: Value,
+    pub king_mobility_weight: Value,
+    pub king_safety_weight: Value,
+}
+
+impl Default for EvaluationConfig {
+    fn default() -> Self {
+        Self {
+            mobility_weight: 10,
+            pawn_mobility_weight: 5,
+            knight_mobility_weight: 30,
+            bishop_mobility_weight: 30,
+            rook_mobility_weight: 20,
+            queen_mobility_weight: 10,
+            king_mobility_weight: 5,
+            king_safety_weight: 50,
+        }
+    }
+}
+
 fn evaluate_outcome(outcome: &Outcome) -> Value {
     match outcome {
         Outcome::Known(KnownOutcome::Decisive { winner }) => match winner {
@@ -141,6 +168,8 @@ fn get_number_of_moves_for_black(position: &Chess) -> usize {
     get_number_of_moves_for_color(position, Color::Black)
 }
 
+pub mod king_safety_evaluation;
+pub mod main_evaluation;
 pub mod material_evaluation;
 pub mod material_mobility_evaluation;
 #[cfg(test)]
