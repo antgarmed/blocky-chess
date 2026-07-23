@@ -5,3 +5,4 @@ edition = "2021"
 
 [dependencies]
 blocky-chess = { path = "../.." }
+shakmaty = "0.30.1"

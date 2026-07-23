@@ -4,6 +4,7 @@
 //! reusable representation of an evaluation genome.
 
 pub mod genome;
+pub mod self_play;
 
 pub use genome::{
     Gene, Genome, GenomeError, EFFECTIVE_MOBILITY_WEIGHT, EVALUATION_QUANTIZATION_SCALE, GENE_COUNT,
