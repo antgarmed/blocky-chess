@@ -1,4 +1,4 @@
-use shakmaty::{Chess, Color, Outcome, Piece, Position, Role};
+use shakmaty::{Chess, Color, MoveList, Outcome, Piece, Position, Role};
 
 use crate::{search::Value, utils::consts::MATE_VALUE};
 
@@ -113,14 +113,20 @@ fn get_number_of_black_queens(position: &Chess) -> usize {
 }
 
 fn get_number_of_moves_for_color(position: &Chess, color: Color) -> usize {
+    get_legal_moves_for_color(position, color)
+        .map(|moves| moves.len())
+        .unwrap_or(0)
+}
+
+fn get_legal_moves_for_color(position: &Chess, color: Color) -> Option<MoveList> {
     if position.turn() == color {
-        position.legal_moves().len()
+        Some(position.legal_moves())
     } else {
         position
             .clone()
             .swap_turn()
-            .map(|position| position.legal_moves().len())
-            .unwrap_or(0)
+            .ok()
+            .map(|position| position.legal_moves())
     }
 }
 
