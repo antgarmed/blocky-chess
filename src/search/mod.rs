@@ -1,5 +1,6 @@
 use shakmaty::{Chess, Move, MoveList};
 use std::sync::atomic::AtomicBool;
+use std::time::Instant;
 
 use crate::utils::consts::MATE_VALUE;
 
@@ -41,12 +42,27 @@ pub struct SearchConfig {
     pub move_generator: fn(&Chess) -> MoveList,
 }
 
+pub struct SearchLimits<'a> {
+    pub depth: Option<usize>,
+    pub deadline: Option<Instant>,
+    pub stop: &'a AtomicBool,
+}
+
+impl SearchLimits<'_> {
+    pub fn should_stop(&self) -> bool {
+        self.stop.load(std::sync::atomic::Ordering::Relaxed)
+            || self
+                .deadline
+                .is_some_and(|deadline| Instant::now() >= deadline)
+    }
+}
+
 pub trait Search: Send + Sync {
-    fn search_with_stop(
+    fn search_with_limits(
         &self,
         initial_position: &Chess,
-        depth: usize,
-        stop: &AtomicBool,
+        limits: &SearchLimits<'_>,
+        on_iteration: &mut dyn FnMut(usize, &SearchResult),
     ) -> Option<(usize, SearchResult)>;
 }
 

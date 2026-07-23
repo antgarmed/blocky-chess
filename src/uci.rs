@@ -2,7 +2,7 @@ use crate::engine::Engine;
 use crate::evaluation::material_mobility_evaluation::material_mobility_evaluation;
 use crate::movegen::basic_movegen::basic_movegen;
 use crate::search::alpha_beta_iterative_deepening::AlphaBetaIterativeDeepeningSearch;
-use crate::search::{SearchConfig, SearchResult};
+use crate::search::{SearchConfig, SearchLimits, SearchResult};
 use shakmaty::{CastlingMode, Color, Position};
 use std::fmt::Display;
 use std::io::{self, BufRead, Write};
@@ -11,9 +11,8 @@ use std::sync::{
     Arc, Mutex,
 };
 use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant};
 use vampirc_uci::{parse_one, UciMessage, UciSearchControl, UciTimeControl};
-
-const DEFAULT_DEPTH: usize = 6;
 
 struct ActiveSearch {
     stop: Arc<AtomicBool>,
@@ -134,17 +133,50 @@ fn get_engine() -> Engine {
     )))
 }
 
-fn requested_depth(search_control: Option<UciSearchControl>) -> usize {
+fn requested_depth(search_control: Option<UciSearchControl>) -> Option<usize> {
     search_control
         .and_then(|control| control.depth)
         .map(|depth| depth as usize)
         .filter(|depth| *depth > 0)
-        .unwrap_or(DEFAULT_DEPTH)
+}
+
+fn allocated_time(time_control: Option<&UciTimeControl>, turn: Color) -> Option<Duration> {
+    match time_control? {
+        UciTimeControl::MoveTime(time) => {
+            let millis = time.num_milliseconds().max(1) as u64;
+            Some(Duration::from_millis(millis.saturating_mul(9) / 10))
+        }
+        UciTimeControl::TimeLeft {
+            white_time,
+            black_time,
+            white_increment,
+            black_increment,
+            moves_to_go,
+        } => {
+            let time = if turn.is_white() {
+                white_time.as_ref()
+            } else {
+                black_time.as_ref()
+            }?;
+            let increment = if turn.is_white() {
+                white_increment.as_ref()
+            } else {
+                black_increment.as_ref()
+            }
+            .map(|duration| duration.num_milliseconds().max(0) as u64)
+            .unwrap_or(0);
+            let clock = time.num_milliseconds().max(0) as u64;
+            let moves = u64::from(moves_to_go.unwrap_or(30).max(1));
+            let target = clock / moves + increment;
+            Some(Duration::from_millis(target.saturating_mul(8) / 10).max(Duration::from_millis(1)))
+        }
+        UciTimeControl::Infinite | UciTimeControl::Ponder => None,
+    }
 }
 
 fn start_search(
     engine: &Engine,
-    _time_control: Option<UciTimeControl>,
+    time_control: Option<UciTimeControl>,
     search_control: Option<UciSearchControl>,
     output: Arc<Mutex<impl Write + Send + 'static>>,
 ) -> ActiveSearch {
@@ -153,8 +185,20 @@ fn start_search(
     let stop = Arc::new(AtomicBool::new(false));
     let worker_stop = Arc::clone(&stop);
     let worker = thread::spawn(move || {
-        let result = search.search_with_stop(&position, depth, &worker_stop);
-        if let Err(error) = emit_search_result(result.as_ref(), &position, turn, &output) {
+        let deadline =
+            allocated_time(time_control.as_ref(), turn).map(|budget| Instant::now() + budget);
+        let limits = SearchLimits {
+            depth,
+            deadline,
+            stop: &worker_stop,
+        };
+        let mut on_iteration = |completed_depth: usize, result: &SearchResult| {
+            if let Err(error) = emit_info(completed_depth, result, turn, &output) {
+                eprintln!("UCI search info output error: {error}");
+            }
+        };
+        let result = search.search_with_limits(&position, &limits, &mut on_iteration);
+        if let Err(error) = emit_bestmove(result.as_ref(), &position, &output) {
             eprintln!("UCI search output error: {error}");
         }
     });
@@ -172,29 +216,36 @@ fn format_score(search_result: &SearchResult, turn: Color) -> String {
     }
 }
 
-fn emit_search_result<W: Write>(
-    result: Option<&(usize, SearchResult)>,
-    position: &shakmaty::Chess,
+fn emit_info<W: Write>(
+    completed_depth: usize,
+    result: &SearchResult,
     turn: Color,
     output: &Arc<Mutex<W>>,
 ) -> io::Result<()> {
-    if let Some((completed_depth, result)) = result {
+    let pv = result
+        .principal_variation
+        .iter()
+        .map(|chess_move| chess_move.to_uci(CastlingMode::Standard).to_string())
+        .collect::<Vec<_>>()
+        .join(" ");
+    write_line(
+        output,
+        format!(
+            "info depth {} score {} pv {}",
+            completed_depth,
+            format_score(result, turn),
+            pv
+        ),
+    )
+}
+
+fn emit_bestmove<W: Write>(
+    result: Option<&(usize, SearchResult)>,
+    position: &shakmaty::Chess,
+    output: &Arc<Mutex<W>>,
+) -> io::Result<()> {
+    if let Some((_completed_depth, result)) = result {
         if let Some(best_move) = result.principal_variation.first() {
-            let pv = result
-                .principal_variation
-                .iter()
-                .map(|chess_move| chess_move.to_uci(CastlingMode::Standard).to_string())
-                .collect::<Vec<_>>()
-                .join(" ");
-            write_line(
-                output,
-                format!(
-                    "info depth {} score {} pv {}",
-                    completed_depth,
-                    format_score(result, turn),
-                    pv
-                ),
-            )?;
             write_line(
                 output,
                 format!("bestmove {}", best_move.to_uci(CastlingMode::Standard)),
@@ -280,14 +331,30 @@ mod tests {
     }
 
     #[test]
-    fn default_and_explicit_depth_are_supported() {
-        assert_eq!(requested_depth(None), DEFAULT_DEPTH);
+    fn absent_depth_is_unbounded_and_explicit_depth_is_supported() {
+        assert_eq!(requested_depth(None), None);
         assert_eq!(
             requested_depth(Some(UciSearchControl {
                 depth: Some(4),
                 ..Default::default()
             })),
-            4
+            Some(4)
+        );
+    }
+
+    #[test]
+    fn time_left_allocates_clock_time_by_moves_to_go() {
+        let UciMessage::Go {
+            time_control: Some(time_control),
+            ..
+        } = parse_one("go wtime 300000 btime 300000 movestogo 40")
+        else {
+            panic!("expected time control");
+        };
+
+        assert_eq!(
+            allocated_time(Some(&time_control), Color::White),
+            Some(Duration::from_millis(6_000))
         );
     }
 

@@ -1,7 +1,6 @@
-use super::{Search, SearchConfig, SearchResult, Value};
+use super::{Search, SearchConfig, SearchLimits, SearchResult, Value};
 use crate::utils::consts::MATE_VALUE;
 use shakmaty::{Chess, Color, Outcome, Position};
-use std::sync::atomic::{AtomicBool, Ordering};
 
 const INITIAL_ALPHA: Value = Value::MIN;
 const INITIAL_BETA: Value = Value::MAX;
@@ -25,13 +24,25 @@ impl AlphaBetaSearch {
 }
 
 impl Search for AlphaBetaSearch {
-    fn search_with_stop(
+    fn search_with_limits(
+        &self,
+        initial_position: &Chess,
+        limits: &SearchLimits<'_>,
+        _on_iteration: &mut dyn FnMut(usize, &SearchResult),
+    ) -> Option<(usize, SearchResult)> {
+        let depth = limits.depth.unwrap_or(usize::MAX);
+        self.search_depth_with_limits(initial_position, depth, limits)
+    }
+}
+
+impl AlphaBetaSearch {
+    pub fn search_depth_with_limits(
         &self,
         initial_position: &Chess,
         depth: usize,
-        stop: &AtomicBool,
+        limits: &SearchLimits<'_>,
     ) -> Option<(usize, SearchResult)> {
-        self.alpha_beta_search_with_stop(
+        self.alpha_beta_search_with_limits(
             initial_position,
             depth,
             SearchState {
@@ -40,21 +51,19 @@ impl Search for AlphaBetaSearch {
                 color_to_maximize: initial_position.turn(),
                 ply_from_root: 0,
             },
-            stop,
+            limits,
         )
         .map(|result| (depth, result))
     }
-}
 
-impl AlphaBetaSearch {
-    fn alpha_beta_search_with_stop(
+    fn alpha_beta_search_with_limits(
         &self,
         position: &Chess,
         depth: usize,
         mut state: SearchState,
-        stop: &AtomicBool,
+        limits: &SearchLimits<'_>,
     ) -> Option<SearchResult> {
-        if stop.load(Ordering::Relaxed) {
+        if limits.should_stop() {
             return None;
         }
         if depth == 0 || position.outcome().is_some() {
@@ -78,11 +87,11 @@ impl AlphaBetaSearch {
             principal_variation: Vec::new(),
         };
         for m in (self.config.move_generator)(position) {
-            if stop.load(Ordering::Relaxed) {
+            if limits.should_stop() {
                 return None;
             }
             let child = position.clone().play(&m).unwrap();
-            let child_result = self.alpha_beta_search_with_stop(
+            let child_result = self.alpha_beta_search_with_limits(
                 &child,
                 depth - 1,
                 SearchState {
@@ -91,7 +100,7 @@ impl AlphaBetaSearch {
                     color_to_maximize: !state.color_to_maximize,
                     ply_from_root: state.ply_from_root + 1,
                 },
-                stop,
+                limits,
             )?;
             if (maximizing && child_result.value > best.value)
                 || (!maximizing && child_result.value < best.value)
@@ -138,7 +147,15 @@ mod tests {
         AlphaBetaSearch {
             config: BASIC_CONFIG,
         }
-        .search_with_stop(position, depth, &AtomicBool::new(false))
+        .search_with_limits(
+            position,
+            &SearchLimits {
+                depth: Some(depth),
+                deadline: None,
+                stop: &AtomicBool::new(false),
+            },
+            &mut |_, _| {},
+        )
         .expect("search without cancellation must complete")
         .1
     }
