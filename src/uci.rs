@@ -145,8 +145,13 @@ fn get_engine() -> Engine {
     )))
 }
 
-fn evaluation_options(config: &EvaluationConfig) -> [UciOptionConfig; 8] {
+fn evaluation_options(config: &EvaluationConfig) -> [UciOptionConfig; 13] {
     [
+        material_option("PawnValue", config.pawn_value),
+        material_option("KnightValue", config.knight_value),
+        material_option("BishopValue", config.bishop_value),
+        material_option("RookValue", config.rook_value),
+        material_option("QueenValue", config.queen_value),
         spin_option("MobilityWeight", config.mobility_weight),
         spin_option("PawnMobilityWeight", config.pawn_mobility_weight),
         spin_option("KnightMobilityWeight", config.knight_mobility_weight),
@@ -158,12 +163,20 @@ fn evaluation_options(config: &EvaluationConfig) -> [UciOptionConfig; 8] {
     ]
 }
 
+fn material_option(name: &str, default: i64) -> UciOptionConfig {
+    spin_option_with_bounds(name, default, 0, 1000)
+}
+
 fn spin_option(name: &str, default: i64) -> UciOptionConfig {
+    spin_option_with_bounds(name, default, 0, 100)
+}
+
+fn spin_option_with_bounds(name: &str, default: i64, min: i64, max: i64) -> UciOptionConfig {
     UciOptionConfig::Spin {
         name: name.to_owned(),
         default: Some(default),
-        min: Some(0),
-        max: Some(100),
+        min: Some(min),
+        max: Some(max),
     }
 }
 
@@ -171,27 +184,43 @@ fn apply_evaluation_option(name: &str, value: Option<&str>, config: &mut Evaluat
     let Some(value) = value.and_then(|value| value.parse::<i64>().ok()) else {
         return false;
     };
-    if !(0..=100).contains(&value) {
+    let (target, range) = match name {
+        name if name.eq_ignore_ascii_case("PawnValue") => (&mut config.pawn_value, 0..=1000),
+        name if name.eq_ignore_ascii_case("KnightValue") => (&mut config.knight_value, 0..=1000),
+        name if name.eq_ignore_ascii_case("BishopValue") => (&mut config.bishop_value, 0..=1000),
+        name if name.eq_ignore_ascii_case("RookValue") => (&mut config.rook_value, 0..=1000),
+        name if name.eq_ignore_ascii_case("QueenValue") => (&mut config.queen_value, 0..=1000),
+        name if name.eq_ignore_ascii_case("MobilityWeight") => {
+            (&mut config.mobility_weight, 0..=100)
+        }
+        name if name.eq_ignore_ascii_case("PawnMobilityWeight") => {
+            (&mut config.pawn_mobility_weight, 0..=100)
+        }
+        name if name.eq_ignore_ascii_case("KnightMobilityWeight") => {
+            (&mut config.knight_mobility_weight, 0..=100)
+        }
+        name if name.eq_ignore_ascii_case("BishopMobilityWeight") => {
+            (&mut config.bishop_mobility_weight, 0..=100)
+        }
+        name if name.eq_ignore_ascii_case("RookMobilityWeight") => {
+            (&mut config.rook_mobility_weight, 0..=100)
+        }
+        name if name.eq_ignore_ascii_case("QueenMobilityWeight") => {
+            (&mut config.queen_mobility_weight, 0..=100)
+        }
+        name if name.eq_ignore_ascii_case("KingMobilityWeight") => {
+            (&mut config.king_mobility_weight, 0..=100)
+        }
+        name if name.eq_ignore_ascii_case("KingSafetyWeight") => {
+            (&mut config.king_safety_weight, 0..=100)
+        }
+        _ => return false,
+    };
+
+    if !range.contains(&value) {
         return false;
     }
 
-    let target = match name {
-        name if name.eq_ignore_ascii_case("MobilityWeight") => &mut config.mobility_weight,
-        name if name.eq_ignore_ascii_case("PawnMobilityWeight") => &mut config.pawn_mobility_weight,
-        name if name.eq_ignore_ascii_case("KnightMobilityWeight") => {
-            &mut config.knight_mobility_weight
-        }
-        name if name.eq_ignore_ascii_case("BishopMobilityWeight") => {
-            &mut config.bishop_mobility_weight
-        }
-        name if name.eq_ignore_ascii_case("RookMobilityWeight") => &mut config.rook_mobility_weight,
-        name if name.eq_ignore_ascii_case("QueenMobilityWeight") => {
-            &mut config.queen_mobility_weight
-        }
-        name if name.eq_ignore_ascii_case("KingMobilityWeight") => &mut config.king_mobility_weight,
-        name if name.eq_ignore_ascii_case("KingSafetyWeight") => &mut config.king_safety_weight,
-        _ => return false,
-    };
     *target = value;
     true
 }
@@ -386,10 +415,10 @@ mod tests {
         run_uci(Cursor::new("uci\nisready\nquit\n"), Arc::clone(&output)).unwrap();
         let output = output.lock().unwrap();
 
-        assert_eq!(output.flushes, 12);
+        assert_eq!(output.flushes, 17);
         assert_eq!(
             String::from_utf8(output.bytes.clone()).unwrap(),
-            "id name Blocky 0.1.0\nid author antgarmed\noption name MobilityWeight type spin default 10 min 0 max 100\noption name PawnMobilityWeight type spin default 5 min 0 max 100\noption name KnightMobilityWeight type spin default 30 min 0 max 100\noption name BishopMobilityWeight type spin default 30 min 0 max 100\noption name RookMobilityWeight type spin default 20 min 0 max 100\noption name QueenMobilityWeight type spin default 10 min 0 max 100\noption name KingMobilityWeight type spin default 5 min 0 max 100\noption name KingSafetyWeight type spin default 50 min 0 max 100\nuciok\nreadyok\n"
+            "id name Blocky 0.1.0\nid author antgarmed\noption name PawnValue type spin default 100 min 0 max 1000\noption name KnightValue type spin default 300 min 0 max 1000\noption name BishopValue type spin default 300 min 0 max 1000\noption name RookValue type spin default 500 min 0 max 1000\noption name QueenValue type spin default 900 min 0 max 1000\noption name MobilityWeight type spin default 10 min 0 max 100\noption name PawnMobilityWeight type spin default 5 min 0 max 100\noption name KnightMobilityWeight type spin default 30 min 0 max 100\noption name BishopMobilityWeight type spin default 30 min 0 max 100\noption name RookMobilityWeight type spin default 20 min 0 max 100\noption name QueenMobilityWeight type spin default 10 min 0 max 100\noption name KingMobilityWeight type spin default 5 min 0 max 100\noption name KingSafetyWeight type spin default 50 min 0 max 100\nuciok\nreadyok\n"
         );
     }
 
@@ -400,6 +429,24 @@ mod tests {
         assert!(
             output.contains("option name QueenMobilityWeight type spin default 10 min 0 max 100")
         );
+    }
+
+    #[test]
+    fn material_uci_options_are_applied_and_validate_their_range() {
+        let mut config = EvaluationConfig::default();
+
+        assert!(apply_evaluation_option(
+            "QueenValue",
+            Some("950"),
+            &mut config
+        ));
+        assert_eq!(config.queen_value, 950);
+        assert!(!apply_evaluation_option(
+            "QueenValue",
+            Some("1001"),
+            &mut config
+        ));
+        assert_eq!(config.queen_value, 950);
     }
 
     #[test]

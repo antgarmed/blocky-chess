@@ -4,6 +4,11 @@ use crate::{search::Value, utils::consts::MATE_VALUE};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct EvaluationConfig {
+    pub pawn_value: Value,
+    pub knight_value: Value,
+    pub bishop_value: Value,
+    pub rook_value: Value,
+    pub queen_value: Value,
     pub mobility_weight: Value,
     pub pawn_mobility_weight: Value,
     pub knight_mobility_weight: Value,
@@ -17,6 +22,11 @@ pub struct EvaluationConfig {
 impl Default for EvaluationConfig {
     fn default() -> Self {
         Self {
+            pawn_value: 100,
+            knight_value: 300,
+            bishop_value: 300,
+            rook_value: 500,
+            queen_value: 900,
             mobility_weight: 10,
             pawn_mobility_weight: 5,
             knight_mobility_weight: 30,

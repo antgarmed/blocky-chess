@@ -14,7 +14,7 @@ pub fn main_evaluation(position: &Chess, config: &EvaluationConfig) -> Value {
         return evaluate_outcome(&outcome);
     }
 
-    material_evaluation(position)
+    material_evaluation(position, config)
         + mobility_evaluation_with_config(position, config)
         + config.king_safety_weight * king_safety_evaluation(position)
 }

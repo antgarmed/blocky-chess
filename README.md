@@ -58,4 +58,4 @@ cargo build --release
 cargo run --release
 ```
 
-The evaluation can be tuned through UCI spin options: `MobilityWeight`, the mobility weights for each piece type, and `KingSafetyWeight`.
+The evaluation can be tuned through UCI spin options. Material values are exposed as `PawnValue`, `KnightValue`, `BishopValue`, `RookValue`, and `QueenValue` (range 0–1000). Mobility and king-safety weights are also configurable through `MobilityWeight`, the mobility weights for each piece type, and `KingSafetyWeight` (range 0–100).
