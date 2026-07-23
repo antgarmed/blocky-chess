@@ -6,8 +6,8 @@ This project serves as an exploration of applying the **Hexagonal Architecture (
 
 ## Key Features
 
-- **Complete Chess Engine**: Includes board position management, legal move generation, position evaluation, and a move search algorithm.
-- **UCI Support**: Standard communication with chess GUIs via the UCI protocol.
+- **Complete Chess Engine**: Includes board position management, legal move generation, position evaluation based on material, mobility, and king safety, and a move search algorithm.
+- **UCI Support**: Standard communication with chess GUIs via the UCI protocol, including time-aware iterative search and cancellation with `stop`.
 - **Modularity**: Code organized into well-defined components for greater clarity and ease of development.
 - **`shakmaty` Usage**: Leverages the powerful `shakmaty` library for fundamental chess logic.
 
@@ -57,3 +57,5 @@ cargo build --release
 # Run the engine (it will communicate via standard input/output with a UCI GUI)
 cargo run --release
 ```
+
+The evaluation can be tuned through UCI spin options: `MobilityWeight`, the mobility weights for each piece type, and `KingSafetyWeight`.
