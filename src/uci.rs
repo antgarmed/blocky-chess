@@ -1,5 +1,7 @@
 use crate::engine::Engine;
-use crate::evaluation::material_mobility_evaluation::material_mobility_evaluation;
+use crate::evaluation::material_mobility_evaluation::{
+    material_mobility_evaluation_with_config, MaterialMobilityConfig,
+};
 use crate::movegen::basic_movegen::basic_movegen;
 use crate::search::alpha_beta_iterative_deepening::AlphaBetaIterativeDeepeningSearch;
 use crate::search::{SearchConfig, SearchLimits, SearchResult};
@@ -12,7 +14,7 @@ use std::sync::{
 };
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
-use vampirc_uci::{parse_one, UciMessage, UciSearchControl, UciTimeControl};
+use vampirc_uci::{parse_one, UciMessage, UciOptionConfig, UciSearchControl, UciTimeControl};
 
 struct ActiveSearch {
     stop: Arc<AtomicBool>,
@@ -40,6 +42,7 @@ where
     W: Write + Send + 'static,
 {
     let mut engine = get_engine();
+    let mut evaluation_config = MaterialMobilityConfig::default();
     let mut active_search: Option<ActiveSearch> = None;
 
     for line in reader.lines() {
@@ -67,7 +70,16 @@ where
                         author: Some(engine.get_author()),
                     },
                 )?;
+                for option in evaluation_options(&evaluation_config) {
+                    write_line(&output, UciMessage::Option(option))?;
+                }
                 write_line(&output, UciMessage::UciOk)?;
+            }
+            UciMessage::SetOption { name, value } => {
+                stop_active(&mut active_search);
+                if apply_evaluation_option(&name, value.as_deref(), &mut evaluation_config) {
+                    engine.set_evaluation_config(evaluation_config);
+                }
             }
             UciMessage::IsReady => write_line(&output, UciMessage::ReadyOk)?,
             UciMessage::Stop => stop_active(&mut active_search),
@@ -125,12 +137,67 @@ fn stop_active(active: &mut Option<ActiveSearch>) {
 }
 
 fn get_engine() -> Engine {
+    let config = MaterialMobilityConfig::default();
     Engine::new(Box::new(AlphaBetaIterativeDeepeningSearch::new(
         SearchConfig {
-            evaluation_function: material_mobility_evaluation,
+            evaluation_function: material_mobility_evaluation_with_config,
             move_generator: basic_movegen,
+            evaluation_config: Arc::new(std::sync::RwLock::new(config)),
         },
     )))
+}
+
+fn evaluation_options(config: &MaterialMobilityConfig) -> [UciOptionConfig; 7] {
+    [
+        spin_option("MobilityWeight", config.mobility_weight),
+        spin_option("PawnMobilityWeight", config.pawn_mobility_weight),
+        spin_option("KnightMobilityWeight", config.knight_mobility_weight),
+        spin_option("BishopMobilityWeight", config.bishop_mobility_weight),
+        spin_option("RookMobilityWeight", config.rook_mobility_weight),
+        spin_option("QueenMobilityWeight", config.queen_mobility_weight),
+        spin_option("KingMobilityWeight", config.king_mobility_weight),
+    ]
+}
+
+fn spin_option(name: &str, default: i64) -> UciOptionConfig {
+    UciOptionConfig::Spin {
+        name: name.to_owned(),
+        default: Some(default),
+        min: Some(0),
+        max: Some(100),
+    }
+}
+
+fn apply_evaluation_option(
+    name: &str,
+    value: Option<&str>,
+    config: &mut MaterialMobilityConfig,
+) -> bool {
+    let Some(value) = value.and_then(|value| value.parse::<i64>().ok()) else {
+        return false;
+    };
+    if !(0..=100).contains(&value) {
+        return false;
+    }
+
+    let target = match name {
+        name if name.eq_ignore_ascii_case("MobilityWeight") => &mut config.mobility_weight,
+        name if name.eq_ignore_ascii_case("PawnMobilityWeight") => &mut config.pawn_mobility_weight,
+        name if name.eq_ignore_ascii_case("KnightMobilityWeight") => {
+            &mut config.knight_mobility_weight
+        }
+        name if name.eq_ignore_ascii_case("BishopMobilityWeight") => {
+            &mut config.bishop_mobility_weight
+        }
+        name if name.eq_ignore_ascii_case("RookMobilityWeight") => &mut config.rook_mobility_weight,
+        name if name.eq_ignore_ascii_case("QueenMobilityWeight") => {
+            &mut config.queen_mobility_weight
+        }
+        name if name.eq_ignore_ascii_case("KingMobilityWeight") => &mut config.king_mobility_weight,
+        _ => return false,
+    };
+    *target = value;
+    true
 }
 
 fn requested_depth(search_control: Option<UciSearchControl>) -> Option<usize> {
@@ -323,11 +390,33 @@ mod tests {
         run_uci(Cursor::new("uci\nisready\nquit\n"), Arc::clone(&output)).unwrap();
         let output = output.lock().unwrap();
 
-        assert_eq!(output.flushes, 4);
+        assert_eq!(output.flushes, 11);
         assert_eq!(
             String::from_utf8(output.bytes.clone()).unwrap(),
-            "id name Blocky 0.1.0\nid author antgarmed\nuciok\nreadyok\n"
+            "id name Blocky 0.1.0\nid author antgarmed\noption name MobilityWeight type spin default 10 min 0 max 100\noption name PawnMobilityWeight type spin default 5 min 0 max 100\noption name KnightMobilityWeight type spin default 30 min 0 max 100\noption name BishopMobilityWeight type spin default 30 min 0 max 100\noption name RookMobilityWeight type spin default 20 min 0 max 100\noption name QueenMobilityWeight type spin default 10 min 0 max 100\noption name KingMobilityWeight type spin default 5 min 0 max 100\nuciok\nreadyok\n"
         );
+    }
+
+    #[test]
+    fn uci_announces_and_applies_evaluation_options() {
+        let output = run_commands("uci\nsetoption name QueenMobilityWeight value 42\nquit\n");
+
+        assert!(
+            output.contains("option name QueenMobilityWeight type spin default 10 min 0 max 100")
+        );
+    }
+
+    #[test]
+    fn invalid_evaluation_option_is_ignored() {
+        let mut config = MaterialMobilityConfig::default();
+
+        assert!(!apply_evaluation_option(
+            "MobilityWeight",
+            Some("101"),
+            &mut config
+        ));
+        assert_eq!(config.mobility_weight, 10);
+        assert!(!apply_evaluation_option("Unknown", Some("20"), &mut config));
     }
 
     #[test]

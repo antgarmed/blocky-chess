@@ -2,7 +2,9 @@ use shakmaty::{Chess, Move, MoveList};
 use std::sync::atomic::AtomicBool;
 use std::time::Instant;
 
+use crate::evaluation::material_mobility_evaluation::MaterialMobilityConfig;
 use crate::utils::consts::MATE_VALUE;
+use std::sync::{Arc, RwLock};
 
 pub type Value = i64;
 
@@ -30,7 +32,7 @@ impl SearchResult {
             return None;
         }
 
-        let mate_in = (diff + 1) / 2;
+        let mate_in = diff.div_ceil(2);
 
         Some(mate_in)
     }
@@ -38,8 +40,9 @@ impl SearchResult {
 
 #[derive(Clone)]
 pub struct SearchConfig {
-    pub evaluation_function: fn(&Chess) -> Value,
+    pub evaluation_function: fn(&Chess, &MaterialMobilityConfig) -> Value,
     pub move_generator: fn(&Chess) -> MoveList,
+    pub evaluation_config: Arc<RwLock<MaterialMobilityConfig>>,
 }
 
 pub struct SearchLimits<'a> {
@@ -58,6 +61,8 @@ impl SearchLimits<'_> {
 }
 
 pub trait Search: Send + Sync {
+    fn set_evaluation_config(&self, config: MaterialMobilityConfig);
+
     fn search_with_limits(
         &self,
         initial_position: &Chess,

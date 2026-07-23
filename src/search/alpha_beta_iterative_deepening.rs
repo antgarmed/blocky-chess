@@ -1,4 +1,5 @@
 use super::{alphabeta::AlphaBetaSearch, Search, SearchConfig, SearchLimits, SearchResult};
+use crate::evaluation::material_mobility_evaluation::MaterialMobilityConfig;
 use shakmaty::Chess;
 
 pub struct AlphaBetaIterativeDeepeningSearch {
@@ -14,6 +15,10 @@ impl AlphaBetaIterativeDeepeningSearch {
 }
 
 impl Search for AlphaBetaIterativeDeepeningSearch {
+    fn set_evaluation_config(&self, config: MaterialMobilityConfig) {
+        self.alpha_beta_search.set_evaluation_config(config);
+    }
+
     fn search_with_limits(
         &self,
         initial_position: &Chess,
@@ -44,9 +49,10 @@ mod tests {
     use super::*;
     use crate::movegen::basic_movegen::basic_movegen;
     use std::sync::atomic::{AtomicBool, Ordering};
+    use std::sync::{Arc, RwLock};
     use std::time::{Duration, Instant};
 
-    fn zero(_: &Chess) -> i64 {
+    fn zero(_: &Chess, _: &MaterialMobilityConfig) -> i64 {
         0
     }
 
@@ -55,6 +61,7 @@ mod tests {
         let search = AlphaBetaIterativeDeepeningSearch::new(SearchConfig {
             evaluation_function: zero,
             move_generator: basic_movegen,
+            evaluation_config: Arc::new(RwLock::new(MaterialMobilityConfig::default())),
         });
         let stop = AtomicBool::new(true);
         let limits = SearchLimits {
@@ -73,6 +80,7 @@ mod tests {
         let search = AlphaBetaIterativeDeepeningSearch::new(SearchConfig {
             evaluation_function: zero,
             move_generator: basic_movegen,
+            evaluation_config: Arc::new(RwLock::new(MaterialMobilityConfig::default())),
         });
         let stop = AtomicBool::new(false);
         let limits = SearchLimits {
@@ -91,6 +99,7 @@ mod tests {
         let search = AlphaBetaIterativeDeepeningSearch::new(SearchConfig {
             evaluation_function: zero,
             move_generator: basic_movegen,
+            evaluation_config: Arc::new(RwLock::new(MaterialMobilityConfig::default())),
         });
         let stop = AtomicBool::new(false);
         let limits = SearchLimits {

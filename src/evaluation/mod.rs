@@ -112,6 +112,7 @@ fn get_number_of_black_queens(position: &Chess) -> usize {
         .count()
 }
 
+#[cfg(test)]
 fn get_number_of_moves_for_color(position: &Chess, color: Color) -> usize {
     get_legal_moves_for_color(position, color)
         .map(|moves| moves.len())
@@ -130,10 +131,12 @@ fn get_legal_moves_for_color(position: &Chess, color: Color) -> Option<MoveList>
     }
 }
 
+#[cfg(test)]
 fn get_number_of_moves_for_white(position: &Chess) -> usize {
     get_number_of_moves_for_color(position, Color::White)
 }
 
+#[cfg(test)]
 fn get_number_of_moves_for_black(position: &Chess) -> usize {
     get_number_of_moves_for_color(position, Color::Black)
 }

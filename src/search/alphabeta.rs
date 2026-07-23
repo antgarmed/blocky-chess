@@ -1,4 +1,5 @@
 use super::{Search, SearchConfig, SearchLimits, SearchResult, Value};
+use crate::evaluation::material_mobility_evaluation::MaterialMobilityConfig;
 use crate::utils::consts::MATE_VALUE;
 use shakmaty::{Chess, Color, KnownOutcome, Outcome, Position};
 
@@ -24,6 +25,10 @@ impl AlphaBetaSearch {
 }
 
 impl Search for AlphaBetaSearch {
+    fn set_evaluation_config(&self, config: MaterialMobilityConfig) {
+        *self.config.evaluation_config.write().unwrap() = config;
+    }
+
     fn search_with_limits(
         &self,
         initial_position: &Chess,
@@ -76,7 +81,10 @@ impl AlphaBetaSearch {
                     state.ply_from_root as i64 - MATE_VALUE
                 }
                 Outcome::Known(KnownOutcome::Draw) => 0,
-                _ => (self.config.evaluation_function)(position),
+                _ => {
+                    let config = self.config.evaluation_config.read().unwrap();
+                    (self.config.evaluation_function)(position, &config)
+                }
             };
             return Some(SearchResult {
                 value,
@@ -133,7 +141,7 @@ mod tests {
     use shakmaty::{CastlingMode, KnownOutcome, Outcome};
     use std::sync::atomic::AtomicBool;
 
-    fn zero_evaluation(position: &Chess) -> Value {
+    fn zero_evaluation(position: &Chess, _: &MaterialMobilityConfig) -> Value {
         match position.outcome() {
             Outcome::Known(KnownOutcome::Decisive { winner }) if winner.is_white() => MATE_VALUE,
             Outcome::Known(KnownOutcome::Decisive { .. }) => -MATE_VALUE,
@@ -141,14 +149,19 @@ mod tests {
         }
     }
 
-    const BASIC_CONFIG: SearchConfig = SearchConfig {
-        evaluation_function: zero_evaluation,
-        move_generator: basic_movegen,
-    };
+    fn basic_config() -> SearchConfig {
+        SearchConfig {
+            evaluation_function: zero_evaluation,
+            move_generator: basic_movegen,
+            evaluation_config: std::sync::Arc::new(std::sync::RwLock::new(
+                MaterialMobilityConfig::default(),
+            )),
+        }
+    }
 
     fn search(position: &Chess, depth: usize) -> SearchResult {
         AlphaBetaSearch {
-            config: BASIC_CONFIG,
+            config: basic_config(),
         }
         .search_with_limits(
             position,
