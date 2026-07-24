@@ -104,6 +104,20 @@ function Write-Status {
     Move-Item -LiteralPath $temporaryStatus -Destination $statusPath
 }
 
+function Stop-TrainingProcess {
+    param(
+        [System.Diagnostics.Process]$CommandProcess,
+        [datetime]$BatchStartedAt
+    )
+    Get-Process -Name "blocky-evolution" -ErrorAction SilentlyContinue |
+        Where-Object { $_.StartTime -ge $BatchStartedAt.AddSeconds(-1) } |
+        Stop-Process -Force
+    if (-not $CommandProcess.WaitForExit(10000)) {
+        $CommandProcess.Kill()
+        $CommandProcess.WaitForExit()
+    }
+}
+
 Set-Location $repository
 $argumentText = ($trainingArguments | ForEach-Object { Quote-CommandArgument $_ }) -join " "
 $commandText = '"' + $executable + '" ' + $argumentText +
@@ -132,12 +146,12 @@ try {
         }
         if ($generation -ge 100) {
             $reason = "training_complete"
-            & taskkill.exe /PID $process.Id /T /F | Out-Null
+            Stop-TrainingProcess $process $startedAt
             break
         }
         if ((Get-Date) -ge $deadline -and $generation -gt $initialGeneration) {
             $reason = "time_box_complete"
-            & taskkill.exe /PID $process.Id /T /F | Out-Null
+            Stop-TrainingProcess $process $startedAt
             break
         }
     }
@@ -145,8 +159,7 @@ try {
 }
 finally {
     if (-not $process.HasExited) {
-        & taskkill.exe /PID $process.Id /T /F | Out-Null
-        $process.WaitForExit()
+        Stop-TrainingProcess $process $startedAt
     }
 }
 

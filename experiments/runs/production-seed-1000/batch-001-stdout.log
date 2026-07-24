@@ -1,0 +1,155 @@
+Evolution started: 100 generations, population 32
+Generation 1/100 completed: best individual 10, score 7; elapsed 36.641s, 4.367 games/s
+Checkpoint saved: generation 1
+Generation 2/100 completed: best individual 34, score 7.5; elapsed 46.428s, 3.446 games/s
+Checkpoint saved: generation 2
+Generation 3/100 completed: best individual 64, score 6.5; elapsed 44.060s, 3.631 games/s
+Checkpoint saved: generation 3
+Generation 4/100 completed: best individual 88, score 7; elapsed 39.902s, 4.010 games/s
+Checkpoint saved: generation 4
+Generation 5/100 completed: best individual 88, score 7.5; elapsed 44.922s, 3.562 games/s
+Checkpoint saved: generation 5
+Generation 6/100 completed: best individual 174, score 7; elapsed 40.856s, 3.916 games/s
+Checkpoint saved: generation 6
+Generation 7/100 completed: best individual 184, score 7; elapsed 37.379s, 4.281 games/s
+Checkpoint saved: generation 7
+Generation 8/100 completed: best individual 216, score 7; elapsed 46.615s, 3.432 games/s
+Checkpoint saved: generation 8
+Generation 9/100 completed: best individual 242, score 7.5; elapsed 38.737s, 4.130 games/s
+Checkpoint saved: generation 9
+Generation 10/100 completed: best individual 277, score 7; elapsed 48.617s, 3.291 games/s
+Checkpoint saved: generation 10
+Generation 11/100 completed: best individual 309, score 7; elapsed 47.721s, 3.353 games/s
+Checkpoint saved: generation 11
+Generation 12/100 completed: best individual 350, score 7; elapsed 48.452s, 3.302 games/s
+Checkpoint saved: generation 12
+Generation 13/100 completed: best individual 377, score 7; elapsed 52.589s, 3.042 games/s
+Checkpoint saved: generation 13
+Generation 14/100 completed: best individual 393, score 6; elapsed 54.737s, 2.923 games/s
+Checkpoint saved: generation 14
+Generation 15/100 completed: best individual 393, score 7; elapsed 52.772s, 3.032 games/s
+Checkpoint saved: generation 15
+Generation 16/100 completed: best individual 455, score 6.5; elapsed 54.126s, 2.956 games/s
+Checkpoint saved: generation 16
+Generation 17/100 completed: best individual 500, score 7.5; elapsed 40.154s, 3.985 games/s
+Checkpoint saved: generation 17
+Generation 18/100 completed: best individual 512, score 7; elapsed 38.551s, 4.150 games/s
+Checkpoint saved: generation 18
+Generation 19/100 completed: best individual 512, score 6.5; elapsed 56.134s, 2.850 games/s
+Checkpoint saved: generation 19
+Generation 20/100 completed: best individual 583, score 7; elapsed 46.216s, 3.462 games/s
+Checkpoint saved: generation 20
+Generation 21/100 completed: best individual 618, score 7.5; elapsed 51.716s, 3.094 games/s
+Checkpoint saved: generation 21
+Generation 22/100 completed: best individual 618, score 6.5; elapsed 46.756s, 3.422 games/s
+Checkpoint saved: generation 22
+Generation 23/100 completed: best individual 690, score 7; elapsed 64.247s, 2.490 games/s
+Checkpoint saved: generation 23
+Generation 24/100 completed: best individual 713, score 6.5; elapsed 34.599s, 4.624 games/s
+Checkpoint saved: generation 24
+Generation 25/100 completed: best individual 729, score 7; elapsed 69.711s, 2.295 games/s
+Checkpoint saved: generation 25
+Generation 26/100 completed: best individual 761, score 7; elapsed 49.513s, 3.232 games/s
+Checkpoint saved: generation 26
+Generation 27/100 completed: best individual 799, score 7; elapsed 52.962s, 3.021 games/s
+Checkpoint saved: generation 27
+Generation 28/100 completed: best individual 813, score 6.5; elapsed 59.216s, 2.702 games/s
+Checkpoint saved: generation 28
+Generation 29/100 completed: best individual 845, score 8; elapsed 60.369s, 2.650 games/s
+Checkpoint saved: generation 29
+Generation 30/100 completed: best individual 875, score 7; elapsed 69.149s, 2.314 games/s
+Checkpoint saved: generation 30
+Generation 31/100 completed: best individual 929, score 7.5; elapsed 57.812s, 2.768 games/s
+Checkpoint saved: generation 31
+Generation 32/100 completed: best individual 947, score 7; elapsed 66.601s, 2.402 games/s
+Checkpoint saved: generation 32
+Generation 33/100 completed: best individual 984, score 7; elapsed 58.434s, 2.738 games/s
+Checkpoint saved: generation 33
+Generation 34/100 completed: best individual 1006, score 7; elapsed 52.268s, 3.061 games/s
+Checkpoint saved: generation 34
+Generation 35/100 completed: best individual 1046, score 7.5; elapsed 51.791s, 3.089 games/s
+Checkpoint saved: generation 35
+Generation 36/100 completed: best individual 1069, score 7; elapsed 65.185s, 2.455 games/s
+Checkpoint saved: generation 36
+Generation 37/100 completed: best individual 1111, score 7.5; elapsed 39.480s, 4.053 games/s
+Checkpoint saved: generation 37
+Generation 38/100 completed: best individual 1121, score 7; elapsed 41.865s, 3.822 games/s
+Checkpoint saved: generation 38
+Generation 39/100 completed: best individual 1170, score 7.5; elapsed 41.845s, 3.824 games/s
+Checkpoint saved: generation 39
+Generation 40/100 completed: best individual 1185, score 7.5; elapsed 54.409s, 2.941 games/s
+Checkpoint saved: generation 40
+Generation 41/100 completed: best individual 1227, score 6.5; elapsed 43.291s, 3.696 games/s
+Checkpoint saved: generation 41
+Generation 42/100 completed: best individual 1203, score 7; elapsed 43.037s, 3.718 games/s
+Checkpoint saved: generation 42
+Generation 43/100 completed: best individual 1275, score 7.5; elapsed 33.297s, 4.805 games/s
+Checkpoint saved: generation 43
+Generation 44/100 completed: best individual 1301, score 7; elapsed 42.414s, 3.772 games/s
+Checkpoint saved: generation 44
+Generation 45/100 completed: best individual 1322, score 7; elapsed 42.049s, 3.805 games/s
+Checkpoint saved: generation 45
+Generation 46/100 completed: best individual 1355, score 6; elapsed 61.353s, 2.608 games/s
+Checkpoint saved: generation 46
+Generation 47/100 completed: best individual 1409, score 8; elapsed 51.125s, 3.130 games/s
+Checkpoint saved: generation 47
+Generation 48/100 completed: best individual 1414, score 7.5; elapsed 52.453s, 3.050 games/s
+Checkpoint saved: generation 48
+Generation 49/100 completed: best individual 1445, score 7; elapsed 56.686s, 2.823 games/s
+Checkpoint saved: generation 49
+Generation 50/100 completed: best individual 1477, score 8; elapsed 46.674s, 3.428 games/s
+Checkpoint saved: generation 50
+Generation 51/100 completed: best individual 1528, score 7.5; elapsed 61.148s, 2.617 games/s
+Checkpoint saved: generation 51
+Generation 52/100 completed: best individual 1545, score 7.5; elapsed 56.450s, 2.834 games/s
+Checkpoint saved: generation 52
+Generation 53/100 completed: best individual 1568, score 6.5; elapsed 59.115s, 2.707 games/s
+Checkpoint saved: generation 53
+Generation 54/100 completed: best individual 1612, score 7.5; elapsed 46.709s, 3.425 games/s
+Checkpoint saved: generation 54
+Generation 55/100 completed: best individual 1644, score 6.5; elapsed 55.994s, 2.857 games/s
+Checkpoint saved: generation 55
+Generation 56/100 completed: best individual 1654, score 6.5; elapsed 54.548s, 2.933 games/s
+Checkpoint saved: generation 56
+Generation 57/100 completed: best individual 1687, score 7; elapsed 54.680s, 2.926 games/s
+Checkpoint saved: generation 57
+Generation 58/100 completed: best individual 1718, score 6.5; elapsed 49.020s, 3.264 games/s
+Checkpoint saved: generation 58
+Generation 59/100 completed: best individual 1743, score 7.5; elapsed 47.753s, 3.351 games/s
+Checkpoint saved: generation 59
+Generation 60/100 completed: best individual 1773, score 7; elapsed 56.655s, 2.824 games/s
+Checkpoint saved: generation 60
+Generation 61/100 completed: best individual 1808, score 7; elapsed 69.488s, 2.303 games/s
+Checkpoint saved: generation 61
+Generation 62/100 completed: best individual 1852, score 7; elapsed 57.503s, 2.782 games/s
+Checkpoint saved: generation 62
+Generation 63/100 completed: best individual 1885, score 7; elapsed 46.909s, 3.411 games/s
+Checkpoint saved: generation 63
+Generation 64/100 completed: best individual 1893, score 6.5; elapsed 48.659s, 3.288 games/s
+Checkpoint saved: generation 64
+Generation 65/100 completed: best individual 1938, score 7.5; elapsed 58.055s, 2.756 games/s
+Checkpoint saved: generation 65
+Generation 66/100 completed: best individual 1978, score 7.5; elapsed 44.503s, 3.595 games/s
+Checkpoint saved: generation 66
+Generation 67/100 completed: best individual 1988, score 6.5; elapsed 53.620s, 2.984 games/s
+Checkpoint saved: generation 67
+Generation 68/100 completed: best individual 2041, score 7; elapsed 58.599s, 2.730 games/s
+Checkpoint saved: generation 68
+Generation 69/100 completed: best individual 2042, score 7; elapsed 53.808s, 2.974 games/s
+Checkpoint saved: generation 69
+Generation 70/100 completed: best individual 2091, score 7; elapsed 47.241s, 3.387 games/s
+Checkpoint saved: generation 70
+Generation 71/100 completed: best individual 2091, score 7.5; elapsed 38.123s, 4.197 games/s
+Checkpoint saved: generation 71
+Generation 72/100 completed: best individual 2139, score 7; elapsed 49.787s, 3.214 games/s
+Checkpoint saved: generation 72
+Generation 73/100 completed: best individual 2162, score 7; elapsed 43.389s, 3.688 games/s
+Checkpoint saved: generation 73
+Generation 74/100 completed: best individual 2195, score 7; elapsed 62.714s, 2.551 games/s
+Checkpoint saved: generation 74
+Generation 75/100 completed: best individual 2224, score 6.5; elapsed 56.628s, 2.825 games/s
+Checkpoint saved: generation 75
+Generation 76/100 completed: best individual 2254, score 7.5; elapsed 53.409s, 2.996 games/s
+Checkpoint saved: generation 76
+Generation 77/100 completed: best individual 2288, score 7; elapsed 44.812s, 3.570 games/s
+Checkpoint saved: generation 77
