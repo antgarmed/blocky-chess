@@ -9,6 +9,7 @@ use crate::{
         SelfPlayPopulationEvaluator,
     },
     genome::Genome,
+    progress::{NoopProgressObserver, ProgressObserver},
     validation::{ChampionValidator, ValidationConfig, ValidationError, ValidationReport},
 };
 
@@ -100,18 +101,33 @@ impl ProductionExperimentService {
         evolution: EvolutionConfig,
         validation: ValidationConfig,
     ) -> Result<Self, ExperimentConfigError> {
+        Self::production_with_observers(
+            evolution,
+            validation,
+            Box::new(NoopProgressObserver),
+            Box::new(NoopProgressObserver),
+        )
+    }
+
+    pub fn production_with_observers(
+        evolution: EvolutionConfig,
+        validation: ValidationConfig,
+        evolution_observer: Box<dyn ProgressObserver>,
+        validation_observer: Box<dyn ProgressObserver>,
+    ) -> Result<Self, ExperimentConfigError> {
         if evolution.training().master_seed() == validation.master_seed() {
             return Err(ExperimentConfigError::SeedCollision(
                 validation.master_seed(),
             ));
         }
-        let trainer = EvolutionEngine::with_defaults(
+        let trainer = EvolutionEngine::with_observer(
             evolution,
             SelfPlayPopulationEvaluator::new(ProductionGameRunner),
+            evolution_observer,
         );
         Ok(Self::new(
             trainer,
-            ChampionValidator::production(validation),
+            ChampionValidator::with_observer(validation, ProductionGameRunner, validation_observer),
         ))
     }
 }

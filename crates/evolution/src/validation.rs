@@ -10,6 +10,7 @@ use crate::{
     genome::Genome,
     openings::{OpeningGenerationError, OpeningId, OpeningPool},
     pairing::Score,
+    progress::{NoopProgressObserver, ProgressEvent, ProgressObserver},
     self_play::GameOutcome,
     training::{TrainingConfig, TrainingConfigError},
 };
@@ -169,11 +170,24 @@ pub struct ValidationReport {
 pub struct ChampionValidator<R> {
     config: ValidationConfig,
     runner: R,
+    observer: Box<dyn ProgressObserver>,
 }
 
 impl<R> ChampionValidator<R> {
     pub fn new(config: ValidationConfig, runner: R) -> Self {
-        Self { config, runner }
+        Self::with_observer(config, runner, Box::new(NoopProgressObserver))
+    }
+
+    pub fn with_observer(
+        config: ValidationConfig,
+        runner: R,
+        observer: Box<dyn ProgressObserver>,
+    ) -> Self {
+        Self {
+            config,
+            runner,
+            observer,
+        }
     }
 
     pub const fn config(&self) -> &ValidationConfig {
@@ -198,12 +212,22 @@ impl<R: ConfiguredGameRunner> ChampionValidator<R> {
         let candidate_config = candidate.to_evaluation_config();
         let reference = EvaluationConfig::default();
         let mut by_depth = Vec::with_capacity(self.config.search_depths.len());
+        self.observer.on_event(ProgressEvent::ValidationStarted {
+            depth_count: self.config.search_depths.len(),
+            openings_per_depth: pool.openings().len(),
+        });
 
-        for &depth in &self.config.search_depths {
+        for (depth_index, &depth) in self.config.search_depths.iter().enumerate() {
+            self.observer
+                .on_event(ProgressEvent::ValidationDepthStarted {
+                    search_depth: depth,
+                    depth_index,
+                    total_depths: self.config.search_depths.len(),
+                });
             let mut candidate_score = Score(0);
             let mut reference_score = Score(0);
             let mut openings = Vec::with_capacity(pool.openings().len());
-            for opening in pool.openings() {
+            for (opening_index, opening) in pool.openings().iter().enumerate() {
                 let first = self
                     .runner
                     .play_configured(
@@ -235,15 +259,30 @@ impl<R: ConfiguredGameRunner> ChampionValidator<R> {
                     candidate_score: opening_candidate_score,
                     reference_score: opening_reference_score,
                 });
+                self.observer
+                    .on_event(ProgressEvent::ValidationOpeningCompleted {
+                        search_depth: depth,
+                        opening_index,
+                        total_openings: pool.openings().len(),
+                        opening: opening.id,
+                    });
             }
+            let accepted = candidate_score.0
+                >= reference_score
+                    .0
+                    .saturating_add(self.config.minimum_margin_half_points);
+            self.observer
+                .on_event(ProgressEvent::ValidationDepthCompleted {
+                    search_depth: depth,
+                    candidate_score,
+                    reference_score,
+                    accepted,
+                });
             by_depth.push(DepthValidationResult {
                 search_depth: depth,
                 candidate_score,
                 reference_score,
-                accepted: candidate_score.0
-                    >= reference_score
-                        .0
-                        .saturating_add(self.config.minimum_margin_half_points),
+                accepted,
                 openings,
             });
         }
@@ -251,6 +290,11 @@ impl<R: ConfiguredGameRunner> ChampionValidator<R> {
         let candidate_score = Score(by_depth.iter().map(|result| result.candidate_score.0).sum());
         let reference_score = Score(by_depth.iter().map(|result| result.reference_score.0).sum());
         let accepted = by_depth.iter().all(|result| result.accepted);
+        self.observer.on_event(ProgressEvent::ValidationCompleted {
+            candidate_score,
+            reference_score,
+            accepted,
+        });
         Ok(ValidationReport {
             config: self.config.clone(),
             by_depth,
@@ -301,7 +345,7 @@ impl<E: Error + 'static> Error for ValidationError<E> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::VecDeque;
+    use std::{cell::RefCell, collections::VecDeque, rc::Rc};
 
     use shakmaty::Chess;
 
@@ -346,6 +390,14 @@ mod tests {
 
     fn candidate() -> Genome {
         Genome::new([1.0; crate::GENE_COUNT]).unwrap()
+    }
+
+    struct RecordingObserver(Rc<RefCell<Vec<ProgressEvent>>>);
+
+    impl ProgressObserver for RecordingObserver {
+        fn on_event(&mut self, event: ProgressEvent) {
+            self.0.borrow_mut().push(event);
+        }
     }
 
     #[test]
@@ -418,6 +470,60 @@ mod tests {
             assert_eq!(games[1].1, candidate.to_evaluation_config());
             assert_eq!((games[0].2, games[0].3), (games[1].2, games[1].3));
         }
+    }
+
+    #[test]
+    fn reports_validation_progress_without_changing_the_report() {
+        let configuration = config(vec![3, 7], 2, 1);
+        let events = Rc::new(RefCell::new(vec![]));
+        let mut silent = ChampionValidator::new(configuration.clone(), RecordingRunner::default());
+        let mut observed = ChampionValidator::with_observer(
+            configuration,
+            RecordingRunner::default(),
+            Box::new(RecordingObserver(events.clone())),
+        );
+
+        let silent_report = silent.validate(&candidate()).unwrap();
+        let observed_report = observed.validate(&candidate()).unwrap();
+
+        assert_eq!(observed_report, silent_report);
+        let events = events.borrow();
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, ProgressEvent::ValidationDepthStarted { .. }))
+                .count(),
+            2
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, ProgressEvent::ValidationOpeningCompleted { .. }))
+                .count(),
+            4
+        );
+        assert_eq!(
+            events
+                .iter()
+                .filter(|event| matches!(event, ProgressEvent::ValidationDepthCompleted { .. }))
+                .count(),
+            2
+        );
+        assert!(matches!(
+            events.first(),
+            Some(ProgressEvent::ValidationStarted {
+                depth_count: 2,
+                openings_per_depth: 2
+            })
+        ));
+        assert_eq!(
+            events.last(),
+            Some(&ProgressEvent::ValidationCompleted {
+                candidate_score: observed_report.candidate_score,
+                reference_score: observed_report.reference_score,
+                accepted: observed_report.accepted,
+            })
+        );
     }
 
     #[test]

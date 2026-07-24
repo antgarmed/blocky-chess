@@ -12,6 +12,7 @@ use crate::{
     genome::{Genome, GenomeError, GENE_COUNT},
     openings::{OpeningGenerationError, OpeningPool},
     pairing::{IndividualId, PairingError, Score, Standing, SwissScheduler},
+    progress::{NoopProgressObserver, ProgressEvent, ProgressObserver},
     rng::{derive_seed, RandomSource, StableRng},
     training::TrainingConfig,
 };
@@ -426,6 +427,16 @@ pub trait PopulationEvaluator {
         population: &[Individual],
         config: &EvolutionConfig,
     ) -> Result<Vec<Standing>, Self::Error>;
+
+    fn evaluate_with_progress(
+        &mut self,
+        generation: usize,
+        population: &[Individual],
+        config: &EvolutionConfig,
+        _observer: &mut dyn ProgressObserver,
+    ) -> Result<Vec<Standing>, Self::Error> {
+        self.evaluate(generation, population, config)
+    }
 }
 
 pub struct SelfPlayPopulationEvaluator<R> {
@@ -450,6 +461,16 @@ impl<R: GameRunner> PopulationEvaluator for SelfPlayPopulationEvaluator<R> {
         population: &[Individual],
         config: &EvolutionConfig,
     ) -> Result<Vec<Standing>, Self::Error> {
+        self.evaluate_with_progress(generation, population, config, &mut NoopProgressObserver)
+    }
+
+    fn evaluate_with_progress(
+        &mut self,
+        generation: usize,
+        population: &[Individual],
+        config: &EvolutionConfig,
+        observer: &mut dyn ProgressObserver,
+    ) -> Result<Vec<Standing>, Self::Error> {
         let seed = derive_seed(config.training().master_seed(), generation as u64, 0);
         let training = config.training().with_master_seed(seed);
         let openings = OpeningPool::generate(config.swiss_rounds(), &training)
@@ -471,7 +492,7 @@ impl<R: GameRunner> PopulationEvaluator for SelfPlayPopulationEvaluator<R> {
         )
         .map_err(SelfPlayEvaluationError::Pairing)?;
 
-        for opening in openings.openings() {
+        for (round_index, opening) in openings.openings().iter().enumerate() {
             let round = scheduler
                 .next_round(&standings, opening.id)
                 .map_err(SelfPlayEvaluationError::Pairing)?;
@@ -489,6 +510,12 @@ impl<R: GameRunner> PopulationEvaluator for SelfPlayPopulationEvaluator<R> {
             for standing in &mut standings {
                 standing.score.0 += scores[&standing.individual].0;
             }
+            observer.on_event(ProgressEvent::SelfPlayRoundCompleted {
+                generation,
+                round: round_index,
+                total_rounds: openings.openings().len(),
+                opening: opening.id,
+            });
         }
         Ok(standings)
     }
@@ -552,21 +579,31 @@ pub struct EvolutionEngine<E> {
     crossover: Box<dyn CrossoverOperator>,
     mutation: Box<dyn MutationOperator>,
     rng: Box<dyn RandomSource>,
+    observer: Box<dyn ProgressObserver>,
     next_id: u64,
 }
 
 impl<E> EvolutionEngine<E> {
     pub fn with_defaults(config: EvolutionConfig, evaluator: E) -> Self {
+        Self::with_observer(config, evaluator, Box::new(NoopProgressObserver))
+    }
+
+    pub fn with_observer(
+        config: EvolutionConfig,
+        evaluator: E,
+        observer: Box<dyn ProgressObserver>,
+    ) -> Self {
         let seed = derive_seed(config.training().master_seed(), u64::MAX, 0);
         let selector = CompetitiveParentSelector::new(config.parent_candidate_count());
         let mutation = AdditiveMutation::from_config(&config);
-        Self::with_operators(
+        Self::with_operators_and_observer(
             config,
             evaluator,
             Box::new(selector),
             Box::new(BlendCrossover),
             Box::new(mutation),
             Box::new(StableRng::new(seed)),
+            observer,
         )
     }
 
@@ -578,6 +615,26 @@ impl<E> EvolutionEngine<E> {
         mutation: Box<dyn MutationOperator>,
         rng: Box<dyn RandomSource>,
     ) -> Self {
+        Self::with_operators_and_observer(
+            config,
+            evaluator,
+            selector,
+            crossover,
+            mutation,
+            rng,
+            Box::new(NoopProgressObserver),
+        )
+    }
+
+    pub fn with_operators_and_observer(
+        config: EvolutionConfig,
+        evaluator: E,
+        selector: Box<dyn ParentSelector>,
+        crossover: Box<dyn CrossoverOperator>,
+        mutation: Box<dyn MutationOperator>,
+        rng: Box<dyn RandomSource>,
+        observer: Box<dyn ProgressObserver>,
+    ) -> Self {
         Self {
             config,
             evaluator,
@@ -585,6 +642,7 @@ impl<E> EvolutionEngine<E> {
             crossover,
             mutation,
             rng,
+            observer,
             next_id: 0,
         }
     }
@@ -628,12 +686,25 @@ impl<E: PopulationEvaluator> EvolutionEngine<E> {
             self.next_id = self.next_id.max(maximum_id + 1);
         }
 
+        self.observer.on_event(ProgressEvent::EvolutionStarted {
+            generations: self.config.generations(),
+            population_size: self.config.population_size(),
+        });
         let mut generations = Vec::with_capacity(self.config.generations());
         let mut best_ever = None;
         for generation in 0..self.config.generations() {
+            self.observer.on_event(ProgressEvent::GenerationStarted {
+                generation,
+                total_generations: self.config.generations(),
+            });
             let standings = self
                 .evaluator
-                .evaluate(generation, &population, &self.config)
+                .evaluate_with_progress(
+                    generation,
+                    &population,
+                    &self.config,
+                    self.observer.as_mut(),
+                )
                 .map_err(EvolutionError::Evaluation)?;
             let ranked = rank_population(&population, standings)?;
             if best_ever
@@ -646,13 +717,25 @@ impl<E: PopulationEvaluator> EvolutionEngine<E> {
                 index: generation,
                 ranked: ranked.clone(),
             });
+            self.observer.on_event(ProgressEvent::GenerationCompleted {
+                generation,
+                total_generations: self.config.generations(),
+                best: ranked[0].individual().id(),
+                best_score: ranked[0].fitness(),
+            });
             if generation + 1 < self.config.generations() {
                 population = self.next_generation(&ranked)?;
             }
         }
+        let best_ever = best_ever.expect("at least one generation is configured");
+        self.observer.on_event(ProgressEvent::EvolutionCompleted {
+            generations: self.config.generations(),
+            best: best_ever.individual().id(),
+            best_score: best_ever.fitness(),
+        });
         Ok(EvolutionResult {
             generations,
-            best_ever: best_ever.expect("at least one generation is configured"),
+            best_ever,
         })
     }
 
@@ -903,6 +986,15 @@ mod tests {
         }
     }
 
+    #[derive(Clone)]
+    struct RecordingObserver(Rc<RefCell<Vec<ProgressEvent>>>);
+
+    impl ProgressObserver for RecordingObserver {
+        fn on_event(&mut self, event: ProgressEvent) {
+            self.0.borrow_mut().push(event);
+        }
+    }
+
     #[test]
     fn seeded_runs_are_deterministic_and_initial_population_is_random_knowledge_free() {
         let seen_a = Rc::new(RefCell::new(vec![]));
@@ -926,6 +1018,135 @@ mod tests {
         assert!(seen_a.borrow()[0]
             .iter()
             .all(|individual| individual.genome() != &Genome::default()));
+    }
+
+    #[test]
+    fn progress_reports_generation_boundaries_without_changing_the_result() {
+        let silent_seen = Rc::new(RefCell::new(vec![]));
+        let observed_seen = Rc::new(RefCell::new(vec![]));
+        let events = Rc::new(RefCell::new(vec![]));
+        let mut silent =
+            EvolutionEngine::with_defaults(config(2, 1), ByIdEvaluator { seen: silent_seen });
+        let mut observed = EvolutionEngine::with_observer(
+            config(2, 1),
+            ByIdEvaluator {
+                seen: observed_seen,
+            },
+            Box::new(RecordingObserver(events.clone())),
+        );
+
+        let silent_result = silent.run().unwrap();
+        let observed_result = observed.run().unwrap();
+
+        assert_eq!(observed_result, silent_result);
+        let events = events.borrow();
+        assert_eq!(
+            events
+                .iter()
+                .map(std::mem::discriminant)
+                .collect::<Vec<_>>(),
+            [
+                ProgressEvent::EvolutionStarted {
+                    generations: 0,
+                    population_size: 0,
+                },
+                ProgressEvent::GenerationStarted {
+                    generation: 0,
+                    total_generations: 0,
+                },
+                ProgressEvent::GenerationCompleted {
+                    generation: 0,
+                    total_generations: 0,
+                    best: IndividualId(0),
+                    best_score: Score(0),
+                },
+                ProgressEvent::GenerationStarted {
+                    generation: 0,
+                    total_generations: 0,
+                },
+                ProgressEvent::GenerationCompleted {
+                    generation: 0,
+                    total_generations: 0,
+                    best: IndividualId(0),
+                    best_score: Score(0),
+                },
+                ProgressEvent::EvolutionCompleted {
+                    generations: 0,
+                    best: IndividualId(0),
+                    best_score: Score(0),
+                },
+            ]
+            .iter()
+            .map(std::mem::discriminant)
+            .collect::<Vec<_>>()
+        );
+        assert!(matches!(
+            events.first(),
+            Some(ProgressEvent::EvolutionStarted {
+                generations: 2,
+                population_size: 4
+            })
+        ));
+        assert!(matches!(
+            events.last(),
+            Some(ProgressEvent::EvolutionCompleted { generations: 2, .. })
+        ));
+    }
+
+    struct DrawRunner;
+
+    impl GameRunner for DrawRunner {
+        type Error = std::convert::Infallible;
+
+        fn play(
+            &mut self,
+            _white: &Genome,
+            _black: &Genome,
+            opening: &crate::openings::Opening,
+            _search_depth: usize,
+            _max_game_plies: usize,
+        ) -> Result<crate::self_play::GameRecord, Self::Error> {
+            Ok(crate::self_play::GameRecord {
+                outcome: crate::self_play::GameOutcome::Draw(
+                    crate::self_play::DrawReason::MaxPlies,
+                ),
+                moves: vec![],
+                position_history: vec![opening.position.clone()],
+                final_position: opening.position.clone(),
+            })
+        }
+    }
+
+    #[test]
+    fn self_play_reports_each_completed_swiss_round() {
+        let events = Rc::new(RefCell::new(vec![]));
+        let observer = RecordingObserver(events.clone());
+        let mut engine = EvolutionEngine::with_observer(
+            config(1, 1),
+            SelfPlayPopulationEvaluator::new(DrawRunner),
+            Box::new(observer),
+        );
+
+        engine.run().unwrap();
+
+        let round_events = events
+            .borrow()
+            .iter()
+            .copied()
+            .filter(|event| matches!(event, ProgressEvent::SelfPlayRoundCompleted { .. }))
+            .collect::<Vec<_>>();
+        assert_eq!(round_events.len(), 3);
+        for (round, event) in round_events.iter().enumerate() {
+            assert!(matches!(
+                event,
+                ProgressEvent::SelfPlayRoundCompleted {
+                    generation: 0,
+                    round: actual_round,
+                    total_rounds: 3,
+                    ..
+                } if *actual_round == round
+            ));
+        }
     }
 
     #[test]
