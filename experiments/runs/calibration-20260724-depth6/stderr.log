@@ -1,0 +1,17 @@
+Evolution started: 1 generations, population 32
+Evolution completed after 1 generations: best individual 1, score 7
+Validation started: 1 depths, 10 openings per depth
+Validation depth 1/1 started (search depth 6)
+Validation depth 6: opening 1/10 completed (opening 0)
+Validation depth 6: opening 2/10 completed (opening 1)
+Validation depth 6: opening 3/10 completed (opening 2)
+Validation depth 6: opening 4/10 completed (opening 3)
+Validation depth 6: opening 5/10 completed (opening 4)
+Validation depth 6: opening 6/10 completed (opening 5)
+Validation depth 6: opening 7/10 completed (opening 6)
+Validation depth 6: opening 8/10 completed (opening 7)
+Validation depth 6: opening 9/10 completed (opening 8)
+Validation depth 6: opening 10/10 completed (opening 9)
+Validation depth 6 completed: candidate 2, reference 18, rejected; 20 games, W/B/D 8/8/4, draws [stalemate 0, insufficient 0, repetition 4, 50-move 0, max-plies 0], plies mean 68.0, min/p50/p95/max 25/64/96/112
+Validation depth 6 telemetry: 20 games, W/B/D 8/8/4, draws [stalemate 0, insufficient 0, repetition 4, 50-move 0, max-plies 0], plies mean 68.0, min/p50/p95/max 25/64/96/112; elapsed 963.809s, 0.021 games/s
+Validation completed: candidate 2, reference 18, rejected

@@ -1,0 +1,16 @@
+{
+  "run_id": "calibration-20260724-depth6",
+  "purpose": "Depth-6 champion-validation runtime calibration using the existing depth-4 training checkpoint",
+  "git_commit": "788fe5d350aa363f0ad21d413ae86a23fba5966d",
+  "build_profile": "release",
+  "workers": 16,
+  "cpu": "13th Gen Intel(R) Core(TM) i9-13900HX (2.20 GHz)",
+  "ram": "32.0 GB (31.7 GB usable)",
+  "validation_depth": 6,
+  "opening_pairs": 10,
+  "validation_games_expected": 20,
+  "notes": [
+    "The existing completed one-generation checkpoint is resumed, so no training games are repeated.",
+    "No GPU or device-name metadata is recorded."
+  ]
+}
