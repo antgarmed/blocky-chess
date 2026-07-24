@@ -109,3 +109,37 @@ fn checkpoint_resume_and_report_are_wired_through_the_binary() {
     fs::remove_file(first_report).unwrap();
     fs::remove_file(resumed_report).unwrap();
 }
+
+#[test]
+fn successful_training_reports_compact_progress_only_on_stdout() {
+    let checkpoint = std::env::temp_dir().join(format!(
+        "blocky-cli-{}-progress-checkpoint.json",
+        std::process::id()
+    ));
+    let mut command = binary();
+    minimal_training(&mut command);
+
+    let output = command
+        .args(["--workers", "1"])
+        .arg("--checkpoint")
+        .arg(&checkpoint)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Evolution started: 1 generations, population 2"));
+    assert!(stdout.contains("Generation 1/1 completed:"));
+    assert!(stdout.contains("Checkpoint saved: generation 1"));
+    assert!(stdout.contains("Experiment complete:"));
+    assert!(!stdout.contains("Swiss round"));
+    assert!(!stdout.contains("telemetry"));
+    assert!(!stdout.contains("draws ["));
+
+    fs::remove_file(checkpoint).unwrap();
+}

@@ -385,10 +385,11 @@ Stopping during a generation may discard only that partial generation. The
 last atomic checkpoint remains authoritative, and deterministic resumption
 recomputes the discarded partial generation identically.
 
-Progress is emitted continuously to standard error: generation start, every
-completed Swiss round, generation telemetry, and generation completion.
-Standard output contains only the final experiment summary. Operational
-monitoring must therefore follow `stderr.log`.
+Compact progress is emitted continuously to standard output: experiment start,
+one line per completed generation, checkpoint saves, and the final summary.
+Each line is flushed immediately, so operational monitoring must follow
+`stdout.log`. Standard error is reserved for actual errors. Detailed
+per-round and per-game telemetry remains in `report.json`.
 
 ## 15. Planned Execution Order
 

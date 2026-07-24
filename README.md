@@ -89,10 +89,11 @@ cargo run --release -p blocky-evolution -- train --checkpoint training.json --re
 Use `cargo run --release -p blocky-evolution -- --help` to list all evolutionary,
 self-play, validation, parallelism, and persistence hyperparameters.
 
-Training progress includes deterministic game telemetry for every Swiss round
-and generation: color wins, draws by adjudication reason, and ply statistics.
-The console also reports elapsed time and games per second. Validation reports
-retain the outcome, draw reason, and ply count of both color-swapped games for
-every opening, together with aggregate statistics in the exported JSON.
+Standard output reports compact live progress: one startup line, one line per
+completed generation, checkpoint saves, and the final summary. Each line is
+flushed immediately so redirected logs can be monitored while training.
+Standard error is reserved for errors. Detailed deterministic game telemetry
+remains in the exported JSON report, including outcomes, draw reasons, and ply
+statistics for training and both color-swapped validation games.
 
 The evaluation can be tuned through UCI spin options. Material values are exposed as `PawnValue`, `KnightValue`, `BishopValue`, `RookValue`, and `QueenValue` (range 0–1000). Mobility and king-safety weights are also configurable through `MobilityWeight`, the mobility weights for each piece type, and `KingSafetyWeight` (range 0–100).

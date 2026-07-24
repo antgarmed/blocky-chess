@@ -1,7 +1,9 @@
 use std::{env, process::ExitCode};
 
 use blocky_evolution::{
-    cli::{render_summary, Command, ConsoleProgressObserver, TrainCommand, HELP},
+    cli::{
+        render_summary, write_stdout_line, Command, ConsoleProgressObserver, TrainCommand, HELP,
+    },
     encounter::ProductionGameRunner,
     evolution::{EvolutionEngine, SelfPlayPopulationEvaluator},
     experiment::ExperimentReport,
@@ -62,6 +64,10 @@ fn run_train(command: TrainCommand) -> ExitCode {
             if let Some(path) = checkpoint_path.as_deref() {
                 write_checkpoint(path, &evolution_config, state)
                     .map_err(|error| Box::new(error) as Box<dyn std::error::Error + Send + Sync>)?;
+                write_stdout_line(&format!(
+                    "Checkpoint saved: generation {}",
+                    state.next_generation()
+                ));
             }
         }
         Ok(())
@@ -97,5 +103,7 @@ fn run_train(command: TrainCommand) -> ExitCode {
         }
     }
     print!("{}", render_summary(&report));
+    use std::io::Write;
+    let _ = std::io::stdout().flush();
     ExitCode::SUCCESS
 }

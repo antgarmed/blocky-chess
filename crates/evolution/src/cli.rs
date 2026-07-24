@@ -1,7 +1,13 @@
 //! Thin command-line adapter for configuring and reporting an experiment.
 
 use std::{
-    error::Error, fmt, num::NonZeroUsize, ops::RangeInclusive, path::PathBuf, time::Instant,
+    error::Error,
+    fmt,
+    io::{self, Write},
+    num::NonZeroUsize,
+    ops::RangeInclusive,
+    path::PathBuf,
+    time::Instant,
 };
 
 use crate::{
@@ -475,13 +481,15 @@ pub fn render_summary(report: &ExperimentReport) -> String {
 #[derive(Default)]
 pub struct ConsoleProgressObserver {
     generation_started: Option<(usize, Instant)>,
-    validation_depth_started: Option<(usize, Instant)>,
+    generation_statistics: Option<(usize, crate::telemetry::GameStatistics, f64)>,
 }
 
 impl ProgressObserver for ConsoleProgressObserver {
     fn on_event(&mut self, event: ProgressEvent) {
-        eprintln!("{}", render_progress(event));
         match event {
+            ProgressEvent::EvolutionStarted { .. } => {
+                write_stdout_line(&render_progress(event));
+            }
             ProgressEvent::GenerationStarted { generation, .. } => {
                 self.generation_started = Some((generation, Instant::now()));
             }
@@ -491,34 +499,36 @@ impl ProgressObserver for ConsoleProgressObserver {
             } => {
                 if let Some((started_generation, started)) = self.generation_started {
                     if started_generation == generation {
-                        eprintln!(
-                            "Generation {} telemetry: {}",
-                            generation + 1,
-                            render_timed_statistics(statistics, started.elapsed().as_secs_f64())
-                        );
+                        self.generation_statistics =
+                            Some((generation, statistics, started.elapsed().as_secs_f64()));
                     }
                 }
             }
-            ProgressEvent::ValidationDepthStarted { search_depth, .. } => {
-                self.validation_depth_started = Some((search_depth, Instant::now()));
-            }
-            ProgressEvent::ValidationDepthCompleted {
-                search_depth,
-                statistics,
-                ..
-            } => {
-                if let Some((started_depth, started)) = self.validation_depth_started {
-                    if started_depth == search_depth {
-                        eprintln!(
-                            "Validation depth {search_depth} telemetry: {}",
-                            render_timed_statistics(statistics, started.elapsed().as_secs_f64())
-                        );
+            ProgressEvent::GenerationCompleted { generation, .. } => {
+                let mut line = render_progress(event);
+                if let Some((statistics_generation, statistics, elapsed_seconds)) =
+                    self.generation_statistics.take()
+                {
+                    if statistics_generation == generation {
+                        line.push_str(&format!(
+                            "; elapsed {elapsed_seconds:.3}s, {:.3} games/s",
+                            statistics.games as f64 / elapsed_seconds.max(f64::EPSILON)
+                        ));
                     }
                 }
+                write_stdout_line(&line);
             }
             _ => {}
         }
     }
+}
+
+/// Writes a compact progress line and flushes it for redirected live logs.
+pub fn write_stdout_line(line: &str) {
+    let stdout = io::stdout();
+    let mut stdout = stdout.lock();
+    let _ = writeln!(stdout, "{line}");
+    let _ = stdout.flush();
 }
 
 pub fn render_progress(event: ProgressEvent) -> String {
@@ -639,23 +649,6 @@ fn render_statistics(statistics: crate::telemetry::GameStatistics) -> String {
         statistics.median_plies,
         statistics.p95_plies,
         statistics.maximum_plies,
-    )
-}
-
-fn render_timed_statistics(
-    statistics: crate::telemetry::GameStatistics,
-    elapsed_seconds: f64,
-) -> String {
-    let throughput = if elapsed_seconds > 0.0 {
-        statistics.games as f64 / elapsed_seconds
-    } else {
-        0.0
-    };
-    format!(
-        "{}; elapsed {:.3}s, {:.3} games/s",
-        render_statistics(statistics),
-        elapsed_seconds,
-        throughput
     )
 }
 
