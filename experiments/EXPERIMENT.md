@@ -86,7 +86,8 @@ same seed. Runs must not be discarded or replaced because of poor chess
 results.
 
 The source revision, compiler version, build profile, command line, worker
-count, CPU model, and operating system should be recorded for every run.
+count, CPU model, and RAM should be recorded for every run. No device name,
+GPU model, or other hardware-identifying metadata is required.
 
 ## 6. Training Configuration
 
@@ -107,6 +108,7 @@ The initial experiment uses the current default evolutionary hyperparameters:
 | Maximum game length | 200 plies |
 | Opening length | 4-10 plies |
 | Maximum opening attempts | 100 |
+| Workers | 16 |
 
 One generation plays:
 
@@ -148,6 +150,12 @@ If the estimated production cost is impractical, any reduction to population,
 generations, rounds, depth, or number of repetitions must be documented here
 before final validation results are observed.
 
+The calibration completed in 50.312 seconds for 160 games at depth 4. It
+showed that only 16 pairing tasks can run concurrently with a population of
+32. Ten 100-generation runs are estimated to require approximately 14 hours
+of training. The production configuration is therefore retained, with the
+explicit worker count fixed at 16.
+
 ## 8. Held-Out Validation
 
 Each evolved champion is compared with the default evaluation using positions
@@ -157,34 +165,38 @@ generated from a validation seed that is independent from every training seed.
 
 Use:
 
-- 200 held-out openings.
-- Two color-swapped games per opening.
+- 200 held-out openings at depth 4.
+- 50 held-out openings at depth 6.
+- Two color-swapped games per opening and depth.
 - The same held-out openings for every champion.
-- The same openings at search depths 4 and 6.
+- The 50 depth-6 openings are the first 50 openings from the common held-out
+  pool used at depth 4.
 - A maximum game length of 200 plies.
 - Opening lengths from 4 to 10 plies.
 
 This produces:
 
 ```text
-200 openings x 2 colors x 2 depths = 800 validation games per champion
+depth 4: 200 openings x 2 colors = 400 games per champion
+depth 6:  50 openings x 2 colors = 100 games per champion
+total:                                  500 games per champion
 ```
 
-Across 10 champions, final validation requires 8,000 games.
+Across 10 champions, final validation requires 5,000 games.
 
 Using a common validation set makes champion comparisons paired and reduces
 opening-induced variance. The validation seed must be fixed before the final
 experiment, recorded in every result, and never used for training or
 hyperparameter selection.
 
-The proposed fixed seed is the existing default validation seed:
+The fixed sealed validation seed is:
 
 ```text
 6215332838309450821
 ```
 
-If this seed has already been repeatedly inspected during development, choose
-and record a new sealed seed before the experiment instead.
+This seed was not used by either runtime calibration. It must not be executed
+or inspected until all 10 training runs and their champions have been frozen.
 
 ### 8.2 Validation depths
 
@@ -248,8 +260,8 @@ hierarchical bootstrap:
 3. Calculate the aggregate score rate.
 4. Use the bootstrap distribution to construct a 95% confidence interval.
 
-Use a deterministic and recorded analysis seed. The analysis implementation,
-number of bootstrap samples, and software version must be recorded.
+Use 100,000 bootstrap samples with analysis seed `20260724`. The analysis
+implementation and software version must be recorded.
 
 ### 10.3 Multiplicity
 
@@ -339,7 +351,8 @@ For every production run, retain:
 - Exact command line.
 - Git commit SHA and dirty-worktree status.
 - Cargo and Rust compiler versions.
-- Hardware and operating-system information.
+- CPU model and RAM, without device name, GPU model, or additional
+  hardware-identifying metadata.
 - Training and validation seeds.
 - Checkpoints.
 - Complete JSON report.
@@ -354,6 +367,29 @@ reproducibility audit should rerun at least one seed with a different worker
 count and verify that the resulting report is identical apart from recorded
 environment and timing metadata.
 
+### 14.1 Time-boxed training batches
+
+Production training may be split into batches of approximately one hour.
+Every invocation must retain the final target of 100 generations because the
+target generation count is part of checkpoint compatibility.
+
+Use `--checkpoint-every 1`. At the end of a time box:
+
+1. Confirm that the log has completed at least one new generation.
+2. Confirm that the atomic checkpoint records that completed generation.
+3. Stop the process.
+4. Preserve separate stdout and stderr logs for the batch.
+5. Resume the same checkpoint with the exact same evolutionary configuration.
+
+Stopping during a generation may discard only that partial generation. The
+last atomic checkpoint remains authoritative, and deterministic resumption
+recomputes the discarded partial generation identically.
+
+Progress is emitted continuously to standard error: generation start, every
+completed Swiss round, generation telemetry, and generation completion.
+Standard output contains only the final experiment summary. Operational
+monitoring must therefore follow `stderr.log`.
+
 ## 15. Planned Execution Order
 
 1. Freeze this protocol and the experiment code.
@@ -367,17 +403,28 @@ environment and timing metadata.
 9. Publish every run, including unsuccessful and incomplete runs.
 10. Interpret the result according to the criteria in Section 11.
 
-## 16. Decisions to Finalize After Calibration
+## 16. Frozen Post-Calibration Decisions
 
-The following decisions remain open until the production calibration is
-complete:
+The following decisions were frozen after operational calibration and before
+any confirmatory validation result was inspected:
 
-- Whether 10 full repetitions at depth 4 fit the available compute budget.
-- Whether 200 openings at depth 6 are affordable.
-- The explicit worker count.
-- The final sealed validation seed.
-- The bootstrap sample count and analysis seed.
-- Whether missing outcome and timing fields require changes to the JSON report.
+| Decision | Frozen value |
+| --- | --- |
+| Independent runs | 10 |
+| Generations per run | 100 |
+| Training seeds | 1000 through 1009 |
+| Training depth | 4 |
+| Workers | 16 |
+| Maximum game length | 200 plies |
+| Depth-4 validation | 200 opening pairs per champion |
+| Depth-6 validation | 50 opening pairs per champion |
+| Validation seed | 6215332838309450821 |
+| Bootstrap samples | 100,000 |
+| Analysis seed | 20260724 |
 
-These decisions must be finalized before inspecting the confirmatory validation
-results.
+The depth-6 calibration used 10 exploratory opening pairs and took 963.809
+seconds. With 16 workers, 50 opening pairs require four task batches and are
+estimated to take approximately 64 minutes per champion. The complete
+experiment is expected to require approximately 25 hours: about 14 hours of
+training, 21 minutes of depth-4 validation, 10 hours 43 minutes of depth-6
+validation, plus operational overhead.
