@@ -1,12 +1,12 @@
 //! External, held-out validation of an evolved candidate against the engine
 //! reference configuration.
 
-use std::{collections::BTreeSet, error::Error, fmt, ops::RangeInclusive};
+use std::{collections::BTreeSet, error::Error, fmt, num::NonZeroUsize, ops::RangeInclusive};
 
 use blocky_chess::EvaluationConfig;
 
 use crate::{
-    encounter::{ConfiguredGameRunner, ProductionGameRunner},
+    encounter::{ConfiguredGameRunner, ConfiguredGameRunnerFactory, ProductionGameRunner},
     genome::Genome,
     openings::{OpeningGenerationError, OpeningId, OpeningPool},
     pairing::Score,
@@ -167,13 +167,185 @@ pub struct ValidationReport {
 
 /// Runs the external benchmark against the literal engine default, which is
 /// deliberately created here and nowhere in the evolutionary loop.
-pub struct ChampionValidator<R> {
-    config: ValidationConfig,
+pub trait ValidationExecutor {
+    type Error;
+
+    fn play_openings(
+        &mut self,
+        candidate: EvaluationConfig,
+        reference: EvaluationConfig,
+        openings: &[crate::openings::Opening],
+        search_depth: usize,
+        max_game_plies: usize,
+    ) -> Result<Vec<OpeningValidationResult>, ValidationError<Self::Error>>;
+}
+
+pub struct SequentialValidationExecutor<R> {
     runner: R,
+}
+
+impl<R> SequentialValidationExecutor<R> {
+    pub fn new(runner: R) -> Self {
+        Self { runner }
+    }
+
+    pub const fn runner(&self) -> &R {
+        &self.runner
+    }
+}
+
+impl<R: ConfiguredGameRunner> ValidationExecutor for SequentialValidationExecutor<R> {
+    type Error = R::Error;
+
+    fn play_openings(
+        &mut self,
+        candidate: EvaluationConfig,
+        reference: EvaluationConfig,
+        openings: &[crate::openings::Opening],
+        search_depth: usize,
+        max_game_plies: usize,
+    ) -> Result<Vec<OpeningValidationResult>, ValidationError<Self::Error>> {
+        openings
+            .iter()
+            .map(|opening| {
+                play_validation_opening(
+                    &mut self.runner,
+                    candidate,
+                    reference,
+                    opening,
+                    search_depth,
+                    max_game_plies,
+                )
+                .map_err(ValidationError::Game)
+            })
+            .collect()
+    }
+}
+
+pub struct ParallelValidationExecutor<F> {
+    factory: F,
+    workers: NonZeroUsize,
+}
+
+impl<F> ParallelValidationExecutor<F> {
+    pub fn new(factory: F, workers: NonZeroUsize) -> Self {
+        Self { factory, workers }
+    }
+}
+
+impl<F> ValidationExecutor for ParallelValidationExecutor<F>
+where
+    F: ConfiguredGameRunnerFactory + Sync,
+    F::Runner: Send,
+    <F::Runner as ConfiguredGameRunner>::Error: Send,
+{
+    type Error = <F::Runner as ConfiguredGameRunner>::Error;
+
+    fn play_openings(
+        &mut self,
+        candidate: EvaluationConfig,
+        reference: EvaluationConfig,
+        openings: &[crate::openings::Opening],
+        search_depth: usize,
+        max_game_plies: usize,
+    ) -> Result<Vec<OpeningValidationResult>, ValidationError<Self::Error>> {
+        let worker_count = self.workers.get().min(openings.len());
+        if worker_count <= 1 {
+            let mut runner = self.factory.create();
+            return openings
+                .iter()
+                .map(|opening| {
+                    play_validation_opening(
+                        &mut runner,
+                        candidate,
+                        reference,
+                        opening,
+                        search_depth,
+                        max_game_plies,
+                    )
+                    .map_err(ValidationError::Game)
+                })
+                .collect();
+        }
+
+        let worker_results = std::thread::scope(|scope| {
+            let mut handles = Vec::with_capacity(worker_count);
+            for worker in 0..worker_count {
+                let factory = &self.factory;
+                handles.push(scope.spawn(move || {
+                    let mut runner = factory.create();
+                    openings
+                        .iter()
+                        .enumerate()
+                        .skip(worker)
+                        .step_by(worker_count)
+                        .map(|(index, opening)| {
+                            (
+                                index,
+                                play_validation_opening(
+                                    &mut runner,
+                                    candidate,
+                                    reference,
+                                    opening,
+                                    search_depth,
+                                    max_game_plies,
+                                ),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                }));
+            }
+            handles
+                .into_iter()
+                .map(|handle| handle.join())
+                .collect::<Vec<_>>()
+        });
+
+        let mut ordered = (0..openings.len()).map(|_| None).collect::<Vec<_>>();
+        for worker_result in worker_results {
+            for (index, result) in worker_result.map_err(|_| ValidationError::WorkerPanic)? {
+                ordered[index] = Some(result);
+            }
+        }
+        ordered
+            .into_iter()
+            .map(|result| {
+                result
+                    .expect("every dispatched opening must produce one result")
+                    .map_err(ValidationError::Game)
+            })
+            .collect()
+    }
+}
+
+fn play_validation_opening<R: ConfiguredGameRunner>(
+    runner: &mut R,
+    candidate: EvaluationConfig,
+    reference: EvaluationConfig,
+    opening: &crate::openings::Opening,
+    search_depth: usize,
+    max_game_plies: usize,
+) -> Result<OpeningValidationResult, R::Error> {
+    let first =
+        runner.play_configured(candidate, reference, opening, search_depth, max_game_plies)?;
+    let second =
+        runner.play_configured(reference, candidate, opening, search_depth, max_game_plies)?;
+    let candidate_score = Score(points_for_white(first.outcome) + points_for_black(second.outcome));
+    Ok(OpeningValidationResult {
+        opening: opening.id,
+        opening_seed: opening.seed,
+        candidate_score,
+        reference_score: Score(4 - candidate_score.0),
+    })
+}
+
+pub struct ChampionValidator<E> {
+    config: ValidationConfig,
+    executor: E,
     observer: Box<dyn ProgressObserver>,
 }
 
-impl<R> ChampionValidator<R> {
+impl<R> ChampionValidator<SequentialValidationExecutor<R>> {
     pub fn new(config: ValidationConfig, runner: R) -> Self {
         Self::with_observer(config, runner, Box::new(NoopProgressObserver))
     }
@@ -185,27 +357,47 @@ impl<R> ChampionValidator<R> {
     ) -> Self {
         Self {
             config,
-            runner,
+            executor: SequentialValidationExecutor::new(runner),
             observer,
         }
     }
 
+    pub const fn runner(&self) -> &R {
+        self.executor.runner()
+    }
+}
+
+impl<E> ChampionValidator<E> {
     pub const fn config(&self) -> &ValidationConfig {
         &self.config
     }
 }
 
-impl ChampionValidator<ProductionGameRunner> {
+impl ChampionValidator<SequentialValidationExecutor<ProductionGameRunner>> {
     pub fn production(config: ValidationConfig) -> Self {
         Self::new(config, ProductionGameRunner)
     }
 }
 
-impl<R: ConfiguredGameRunner> ChampionValidator<R> {
+impl ChampionValidator<ParallelValidationExecutor<ProductionGameRunner>> {
+    pub fn production_parallel(
+        config: ValidationConfig,
+        workers: NonZeroUsize,
+        observer: Box<dyn ProgressObserver>,
+    ) -> Self {
+        Self {
+            config,
+            executor: ParallelValidationExecutor::new(ProductionGameRunner, workers),
+            observer,
+        }
+    }
+}
+
+impl<E: ValidationExecutor> ChampionValidator<E> {
     pub fn validate(
         &mut self,
         candidate: &Genome,
-    ) -> Result<ValidationReport, ValidationError<R::Error>> {
+    ) -> Result<ValidationReport, ValidationError<E::Error>> {
         let opening_config = self.config.training_at_depth(self.config.search_depths[0]);
         let pool = OpeningPool::generate(self.config.opening_count, &opening_config)
             .map_err(ValidationError::Opening)?;
@@ -224,41 +416,18 @@ impl<R: ConfiguredGameRunner> ChampionValidator<R> {
                     depth_index,
                     total_depths: self.config.search_depths.len(),
                 });
-            let mut candidate_score = Score(0);
-            let mut reference_score = Score(0);
-            let mut openings = Vec::with_capacity(pool.openings().len());
+            let openings = self.executor.play_openings(
+                candidate_config,
+                reference,
+                pool.openings(),
+                depth,
+                self.config.max_game_plies,
+            )?;
+            let candidate_score =
+                Score(openings.iter().map(|result| result.candidate_score.0).sum());
+            let reference_score =
+                Score(openings.iter().map(|result| result.reference_score.0).sum());
             for (opening_index, opening) in pool.openings().iter().enumerate() {
-                let first = self
-                    .runner
-                    .play_configured(
-                        candidate_config,
-                        reference,
-                        opening,
-                        depth,
-                        self.config.max_game_plies,
-                    )
-                    .map_err(ValidationError::Game)?;
-                let second = self
-                    .runner
-                    .play_configured(
-                        reference,
-                        candidate_config,
-                        opening,
-                        depth,
-                        self.config.max_game_plies,
-                    )
-                    .map_err(ValidationError::Game)?;
-                let opening_candidate_score =
-                    Score(points_for_white(first.outcome) + points_for_black(second.outcome));
-                let opening_reference_score = Score(4 - opening_candidate_score.0);
-                candidate_score.0 += opening_candidate_score.0;
-                reference_score.0 += opening_reference_score.0;
-                openings.push(OpeningValidationResult {
-                    opening: opening.id,
-                    opening_seed: opening.seed,
-                    candidate_score: opening_candidate_score,
-                    reference_score: opening_reference_score,
-                });
                 self.observer
                     .on_event(ProgressEvent::ValidationOpeningCompleted {
                         search_depth: depth,
@@ -321,6 +490,7 @@ fn points_for_black(outcome: GameOutcome) -> u32 {
 pub enum ValidationError<E> {
     Opening(OpeningGenerationError),
     Game(E),
+    WorkerPanic,
 }
 
 impl<E: fmt::Display> fmt::Display for ValidationError<E> {
@@ -330,6 +500,7 @@ impl<E: fmt::Display> fmt::Display for ValidationError<E> {
                 write!(formatter, "held-out opening generation failed: {source}")
             }
             Self::Game(source) => write!(formatter, "validation game failed: {source}"),
+            Self::WorkerPanic => formatter.write_str("parallel validation worker panicked"),
         }
     }
 }
@@ -339,13 +510,14 @@ impl<E: Error + 'static> Error for ValidationError<E> {
         match self {
             Self::Opening(source) => Some(source),
             Self::Game(source) => Some(source),
+            Self::WorkerPanic => None,
         }
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use std::{cell::RefCell, collections::VecDeque, rc::Rc};
+    use std::{cell::RefCell, collections::VecDeque, rc::Rc, time::Duration};
 
     use shakmaty::Chess;
 
@@ -456,14 +628,14 @@ mod tests {
         );
         assert_eq!(
             validator
-                .runner
+                .runner()
                 .calls
                 .iter()
                 .map(|call| call.4)
                 .collect::<Vec<_>>(),
             vec![3, 3, 3, 3, 7, 7, 7, 7]
         );
-        for games in validator.runner.calls.chunks_exact(2) {
+        for games in validator.runner().calls.chunks_exact(2) {
             assert_eq!(games[0].0, candidate.to_evaluation_config());
             assert_eq!(games[0].1, EvaluationConfig::default());
             assert_eq!(games[1].0, EvaluationConfig::default());
@@ -524,6 +696,78 @@ mod tests {
                 accepted: observed_report.accepted,
             })
         );
+    }
+
+    #[test]
+    fn production_validation_and_progress_are_identical_for_one_and_many_workers() {
+        let configuration = ValidationConfig::new(vec![1, 2], 2, 1, 99, 2..=2, 100, 0).unwrap();
+        let sequential_events = Rc::new(RefCell::new(vec![]));
+        let parallel_events = Rc::new(RefCell::new(vec![]));
+        let mut sequential = ChampionValidator::production_parallel(
+            configuration.clone(),
+            NonZeroUsize::new(1).unwrap(),
+            Box::new(RecordingObserver(Rc::clone(&sequential_events))),
+        );
+        let mut parallel = ChampionValidator::production_parallel(
+            configuration,
+            NonZeroUsize::new(4).unwrap(),
+            Box::new(RecordingObserver(Rc::clone(&parallel_events))),
+        );
+
+        let sequential_report = sequential.validate(&candidate()).unwrap();
+        let parallel_report = parallel.validate(&candidate()).unwrap();
+
+        assert_eq!(parallel_report, sequential_report);
+        assert_eq!(*parallel_events.borrow(), *sequential_events.borrow());
+    }
+
+    struct DelayedErrorFactory;
+    struct DelayedErrorRunner;
+
+    impl ConfiguredGameRunnerFactory for DelayedErrorFactory {
+        type Runner = DelayedErrorRunner;
+
+        fn create(&self) -> Self::Runner {
+            DelayedErrorRunner
+        }
+    }
+
+    impl ConfiguredGameRunner for DelayedErrorRunner {
+        type Error = &'static str;
+
+        fn play_configured(
+            &mut self,
+            _white: EvaluationConfig,
+            _black: EvaluationConfig,
+            opening: &crate::openings::Opening,
+            _search_depth: usize,
+            _max_game_plies: usize,
+        ) -> Result<GameRecord, Self::Error> {
+            if opening.id == OpeningId(0) {
+                std::thread::sleep(Duration::from_millis(20));
+                Err("first opening")
+            } else {
+                Err("later opening")
+            }
+        }
+    }
+
+    #[test]
+    fn parallel_validation_reports_the_first_logical_error_not_the_fastest_error() {
+        let configuration = config(vec![1], 2, 0);
+        let mut validator = ChampionValidator {
+            config: configuration,
+            executor: ParallelValidationExecutor::new(
+                DelayedErrorFactory,
+                NonZeroUsize::new(2).unwrap(),
+            ),
+            observer: Box::new(NoopProgressObserver),
+        };
+
+        assert!(matches!(
+            validator.validate(&candidate()),
+            Err(ValidationError::Game("first opening"))
+        ));
     }
 
     #[test]

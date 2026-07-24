@@ -1,6 +1,6 @@
 //! Thin command-line adapter for configuring and reporting an experiment.
 
-use std::{error::Error, fmt, ops::RangeInclusive, path::PathBuf};
+use std::{error::Error, fmt, num::NonZeroUsize, ops::RangeInclusive, path::PathBuf};
 
 use crate::{
     evolution::{EvolutionConfig, EvolutionConfigError},
@@ -29,6 +29,7 @@ Evolution:
   --strong-mutation-step P                [default: 0.50]
 
 Training games:
+  --workers N                             Parallel game workers [default: logical CPU count]
   --search-depth N                        [default: 4]
   --max-game-plies N                      [default: 200]
   --training-seed N                       [default: 0]
@@ -65,6 +66,7 @@ pub enum Command {
 pub struct TrainCommand {
     pub evolution: EvolutionConfig,
     pub validation: ValidationConfig,
+    pub workers: NonZeroUsize,
     pub checkpoint: Option<PathBuf>,
     pub checkpoint_every: usize,
     pub resume: Option<PathBuf>,
@@ -116,6 +118,7 @@ pub enum CliError {
     TrainingConfig(TrainingConfigError),
     EvolutionConfig(EvolutionConfigError),
     ValidationConfig(ValidationConfigError),
+    ZeroWorkers,
     ZeroCheckpointFrequency,
 }
 
@@ -158,6 +161,7 @@ impl fmt::Display for CliError {
             Self::ZeroCheckpointFrequency => {
                 formatter.write_str("checkpoint frequency must be greater than zero")
             }
+            Self::ZeroWorkers => formatter.write_str("worker count must be greater than zero"),
         }
     }
 }
@@ -230,6 +234,7 @@ struct RawValues {
     strong_mutation_probability: f64,
     mutation_step: f64,
     strong_mutation_step: f64,
+    workers: usize,
     search_depth: usize,
     max_game_plies: usize,
     training_seed: u64,
@@ -265,6 +270,9 @@ impl Default for RawValues {
             strong_mutation_probability: evolution.strong_mutation_probability(),
             mutation_step: evolution.mutation_step(),
             strong_mutation_step: evolution.strong_mutation_step(),
+            workers: std::thread::available_parallelism()
+                .map(std::num::NonZeroUsize::get)
+                .unwrap_or(1),
             search_depth: training.search_depth(),
             max_game_plies: training.max_game_plies(),
             training_seed: training.master_seed(),
@@ -308,6 +316,7 @@ impl RawValues {
             }
             "--mutation-step" => number!(mutation_step, "a number"),
             "--strong-mutation-step" => number!(strong_mutation_step, "a number"),
+            "--workers" => number!(workers, "a positive integer"),
             "--search-depth" => number!(search_depth, "a non-negative integer"),
             "--max-game-plies" => number!(max_game_plies, "a non-negative integer"),
             "--training-seed" => number!(training_seed, "an unsigned 64-bit integer"),
@@ -354,6 +363,7 @@ impl RawValues {
         if self.checkpoint_every == 0 {
             return Err(CliError::ZeroCheckpointFrequency);
         }
+        let workers = NonZeroUsize::new(self.workers).ok_or(CliError::ZeroWorkers)?;
         let training = TrainingConfig::new(
             self.search_depth,
             self.max_game_plies,
@@ -391,6 +401,7 @@ impl RawValues {
         Ok(TrainCommand {
             evolution,
             validation,
+            workers,
             checkpoint: self.checkpoint,
             checkpoint_every: self.checkpoint_every,
             resume: self.resume,
@@ -585,6 +596,7 @@ mod tests {
         let command = train(&["train"]);
         assert_eq!(command.evolution, EvolutionConfig::default());
         assert_eq!(command.validation, ValidationConfig::default());
+        assert!(command.workers.get() > 0);
         assert_eq!(command.checkpoint, None);
         assert_eq!(command.checkpoint_every, 1);
         assert_eq!(command.resume, None);
@@ -613,6 +625,8 @@ mod tests {
             "0.2",
             "--strong-mutation-step",
             "0.8",
+            "--workers",
+            "3",
             "--search-depth",
             "3",
             "--max-game-plies",
@@ -661,6 +675,7 @@ mod tests {
         assert_eq!(evolution.strong_mutation_probability(), 0.05);
         assert_eq!(evolution.mutation_step(), 0.2);
         assert_eq!(evolution.strong_mutation_step(), 0.8);
+        assert_eq!(command.workers.get(), 3);
         assert_eq!(training.search_depth(), 3);
         assert_eq!(training.max_game_plies(), 80);
         assert_eq!(training.master_seed(), 42);
@@ -720,6 +735,10 @@ mod tests {
         assert_eq!(
             TrainCommand::from_args(["train", "--checkpoint-every", "0"]),
             Err(CliError::ZeroCheckpointFrequency)
+        );
+        assert_eq!(
+            TrainCommand::from_args(["train", "--workers", "0"]),
+            Err(CliError::ZeroWorkers)
         );
     }
 

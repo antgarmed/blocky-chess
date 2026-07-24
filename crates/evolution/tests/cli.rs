@@ -72,6 +72,7 @@ fn checkpoint_resume_and_report_are_wired_through_the_binary() {
     let mut first = binary();
     minimal_training(&mut first);
     let output = first
+        .args(["--workers", "1"])
         .arg("--checkpoint")
         .arg(&checkpoint)
         .arg("--report")
@@ -87,6 +88,7 @@ fn checkpoint_resume_and_report_are_wired_through_the_binary() {
     let mut resumed = binary();
     minimal_training(&mut resumed);
     let output = resumed
+        .args(["--workers", "2"])
         .arg("--resume")
         .arg(&checkpoint)
         .arg("--report")

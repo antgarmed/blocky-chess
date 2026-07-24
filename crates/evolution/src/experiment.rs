@@ -1,16 +1,19 @@
 //! Application service that composes evolution and external validation.
 
-use std::{error::Error, fmt};
+use std::{error::Error, fmt, num::NonZeroUsize};
 
 use crate::{
-    encounter::ProductionGameRunner,
+    encounter::{ParallelRoundExecutor, ProductionGameRunner, SequentialRoundExecutor},
     evolution::{
         EvolutionConfig, EvolutionEngine, EvolutionError, EvolutionResult, PopulationEvaluator,
         SelfPlayPopulationEvaluator,
     },
     genome::Genome,
     progress::{NoopProgressObserver, ProgressObserver},
-    validation::{ChampionValidator, ValidationConfig, ValidationError, ValidationReport},
+    validation::{
+        ChampionValidator, ParallelValidationExecutor, SequentialValidationExecutor,
+        ValidationConfig, ValidationError, ValidationExecutor, ValidationReport,
+    },
 };
 
 /// Boundary used by the experiment service to obtain an evolutionary result.
@@ -35,8 +38,8 @@ pub trait CandidateValidator {
     fn validate_candidate(&mut self, candidate: &Genome) -> Result<ValidationReport, Self::Error>;
 }
 
-impl<R: crate::encounter::ConfiguredGameRunner> CandidateValidator for ChampionValidator<R> {
-    type Error = ValidationError<R::Error>;
+impl<E: ValidationExecutor> CandidateValidator for ChampionValidator<E> {
+    type Error = ValidationError<E::Error>;
 
     fn validate_candidate(&mut self, candidate: &Genome) -> Result<ValidationReport, Self::Error> {
         self.validate(candidate)
@@ -98,8 +101,13 @@ impl<T: EvolutionRunner, V: CandidateValidator> ExperimentService<T, V> {
 }
 
 pub type ProductionExperimentService = ExperimentService<
-    EvolutionEngine<SelfPlayPopulationEvaluator<ProductionGameRunner>>,
-    ChampionValidator<ProductionGameRunner>,
+    EvolutionEngine<SelfPlayPopulationEvaluator<SequentialRoundExecutor<ProductionGameRunner>>>,
+    ChampionValidator<SequentialValidationExecutor<ProductionGameRunner>>,
+>;
+
+pub type ParallelProductionExperimentService = ExperimentService<
+    EvolutionEngine<SelfPlayPopulationEvaluator<ParallelRoundExecutor<ProductionGameRunner>>>,
+    ChampionValidator<ParallelValidationExecutor<ProductionGameRunner>>,
 >;
 
 impl ProductionExperimentService {
@@ -134,6 +142,45 @@ impl ProductionExperimentService {
         Ok(Self::new(
             trainer,
             ChampionValidator::with_observer(validation, ProductionGameRunner, validation_observer),
+        ))
+    }
+}
+
+impl ParallelProductionExperimentService {
+    pub fn production_parallel(
+        evolution: EvolutionConfig,
+        validation: ValidationConfig,
+        workers: NonZeroUsize,
+    ) -> Result<Self, ExperimentConfigError> {
+        Self::production_parallel_with_observers(
+            evolution,
+            validation,
+            workers,
+            Box::new(NoopProgressObserver),
+            Box::new(NoopProgressObserver),
+        )
+    }
+
+    pub fn production_parallel_with_observers(
+        evolution: EvolutionConfig,
+        validation: ValidationConfig,
+        workers: NonZeroUsize,
+        evolution_observer: Box<dyn ProgressObserver>,
+        validation_observer: Box<dyn ProgressObserver>,
+    ) -> Result<Self, ExperimentConfigError> {
+        if evolution.training().master_seed() == validation.master_seed() {
+            return Err(ExperimentConfigError::SeedCollision(
+                validation.master_seed(),
+            ));
+        }
+        let trainer = EvolutionEngine::with_observer(
+            evolution,
+            SelfPlayPopulationEvaluator::parallel(ProductionGameRunner, workers),
+            evolution_observer,
+        );
+        Ok(Self::new(
+            trainer,
+            ChampionValidator::production_parallel(validation, workers, validation_observer),
         ))
     }
 }

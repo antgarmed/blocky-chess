@@ -5,10 +5,13 @@ use std::{
     collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt,
+    num::NonZeroUsize,
 };
 
 use crate::{
-    encounter::{play_round, GameRunner, RoundExecutionError},
+    encounter::{
+        ParallelRoundExecutor, RoundExecutionError, RoundExecutor, SequentialRoundExecutor,
+    },
     genome::{Genome, GenomeError, GENE_COUNT},
     openings::{OpeningGenerationError, OpeningPool},
     pairing::{IndividualId, PairingError, Score, Standing, SwissScheduler},
@@ -439,21 +442,32 @@ pub trait PopulationEvaluator {
     }
 }
 
-pub struct SelfPlayPopulationEvaluator<R> {
-    runner: R,
+pub struct SelfPlayPopulationEvaluator<E> {
+    executor: E,
 }
 
-impl<R> SelfPlayPopulationEvaluator<R> {
+impl<R> SelfPlayPopulationEvaluator<SequentialRoundExecutor<R>> {
     pub fn new(runner: R) -> Self {
-        Self { runner }
+        Self {
+            executor: SequentialRoundExecutor::new(runner),
+        }
     }
+
     pub fn runner(&self) -> &R {
-        &self.runner
+        self.executor.runner()
     }
 }
 
-impl<R: GameRunner> PopulationEvaluator for SelfPlayPopulationEvaluator<R> {
-    type Error = SelfPlayEvaluationError<R::Error>;
+impl<F> SelfPlayPopulationEvaluator<ParallelRoundExecutor<F>> {
+    pub fn parallel(factory: F, workers: NonZeroUsize) -> Self {
+        Self {
+            executor: ParallelRoundExecutor::new(factory, workers),
+        }
+    }
+}
+
+impl<E: RoundExecutor> PopulationEvaluator for SelfPlayPopulationEvaluator<E> {
+    type Error = SelfPlayEvaluationError<E::Error>;
 
     fn evaluate(
         &mut self,
@@ -496,7 +510,9 @@ impl<R: GameRunner> PopulationEvaluator for SelfPlayPopulationEvaluator<R> {
             let round = scheduler
                 .next_round(&standings, opening.id)
                 .map_err(SelfPlayEvaluationError::Pairing)?;
-            let records = play_round(&mut self.runner, &round, &genomes, opening, &training)
+            let records = self
+                .executor
+                .play_round(&round, &genomes, opening, &training)
                 .map_err(SelfPlayEvaluationError::Round)?;
             let scores: BTreeMap<_, _> = records
                 .into_iter()
@@ -1081,6 +1097,7 @@ mod tests {
     use std::{cell::RefCell, rc::Rc};
 
     use super::*;
+    use crate::encounter::GameRunner;
 
     fn config(generations: usize, elite_count: usize) -> EvolutionConfig {
         EvolutionConfig::new(
@@ -1344,6 +1361,45 @@ mod tests {
                 } if *actual_round == round
             ));
         }
+    }
+
+    #[test]
+    fn production_self_play_is_identical_for_one_and_many_workers() {
+        let training = TrainingConfig::new(1, 1, 77, 2..=2, 100).unwrap();
+        let configuration =
+            EvolutionConfig::new(training, 2, 4, 2, 1, 2, 0.15, 0.02, 0.1, 0.5).unwrap();
+        let mut sequential = EvolutionEngine::with_defaults(
+            configuration.clone(),
+            SelfPlayPopulationEvaluator::parallel(
+                crate::encounter::ProductionGameRunner,
+                NonZeroUsize::new(1).unwrap(),
+            ),
+        );
+        let mut parallel = EvolutionEngine::with_defaults(
+            configuration,
+            SelfPlayPopulationEvaluator::parallel(
+                crate::encounter::ProductionGameRunner,
+                NonZeroUsize::new(4).unwrap(),
+            ),
+        );
+        let mut sequential_states = vec![];
+        let mut parallel_states = vec![];
+
+        let sequential_result = sequential
+            .run_with_checkpoints(|state| {
+                sequential_states.push(state.clone());
+                Ok(())
+            })
+            .unwrap();
+        let parallel_result = parallel
+            .run_with_checkpoints(|state| {
+                parallel_states.push(state.clone());
+                Ok(())
+            })
+            .unwrap();
+
+        assert_eq!(parallel_result, sequential_result);
+        assert_eq!(parallel_states, sequential_states);
     }
 
     #[test]

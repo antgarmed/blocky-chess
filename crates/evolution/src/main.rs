@@ -52,7 +52,7 @@ fn run_train(command: TrainCommand) -> ExitCode {
     let evolution_config = command.evolution.clone();
     let mut trainer = EvolutionEngine::with_observer(
         command.evolution,
-        SelfPlayPopulationEvaluator::new(ProductionGameRunner),
+        SelfPlayPopulationEvaluator::parallel(ProductionGameRunner, command.workers),
         Box::new(ConsoleProgressObserver),
     );
     let save = |state: &blocky_evolution::evolution::EvolutionState| {
@@ -77,9 +77,9 @@ fn run_train(command: TrainCommand) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
-    let mut validator = ChampionValidator::with_observer(
+    let mut validator = ChampionValidator::production_parallel(
         command.validation,
-        ProductionGameRunner,
+        command.workers,
         Box::new(ConsoleProgressObserver),
     );
     let validation = match validator.validate(evolution.best_ever().individual().genome()) {

@@ -1,6 +1,6 @@
 //! Paired games that neutralize color and opening variance.
 
-use std::{collections::BTreeMap, error::Error, fmt};
+use std::{collections::BTreeMap, error::Error, fmt, num::NonZeroUsize};
 
 use blocky_chess::EvaluationConfig;
 
@@ -41,8 +41,36 @@ pub trait ConfiguredGameRunner {
     ) -> Result<GameRecord, Self::Error>;
 }
 
-#[derive(Default)]
+#[derive(Clone, Copy, Default)]
 pub struct ProductionGameRunner;
+
+pub trait GameRunnerFactory {
+    type Runner: GameRunner;
+
+    fn create(&self) -> Self::Runner;
+}
+
+impl GameRunnerFactory for ProductionGameRunner {
+    type Runner = Self;
+
+    fn create(&self) -> Self::Runner {
+        *self
+    }
+}
+
+pub trait ConfiguredGameRunnerFactory {
+    type Runner: ConfiguredGameRunner;
+
+    fn create(&self) -> Self::Runner;
+}
+
+impl ConfiguredGameRunnerFactory for ProductionGameRunner {
+    type Runner = Self;
+
+    fn create(&self) -> Self::Runner {
+        *self
+    }
+}
 
 impl GameRunner for ProductionGameRunner {
     type Error = ProductionGameError;
@@ -191,6 +219,143 @@ pub fn play_round<R: GameRunner>(
         .collect()
 }
 
+pub trait RoundExecutor {
+    type Error;
+
+    fn play_round(
+        &mut self,
+        round: &Round,
+        population: &BTreeMap<IndividualId, Genome>,
+        opening: &Opening,
+        config: &TrainingConfig,
+    ) -> Result<Vec<EncounterRecord>, RoundExecutionError<Self::Error>>;
+}
+
+pub struct SequentialRoundExecutor<R> {
+    runner: R,
+}
+
+impl<R> SequentialRoundExecutor<R> {
+    pub fn new(runner: R) -> Self {
+        Self { runner }
+    }
+
+    pub const fn runner(&self) -> &R {
+        &self.runner
+    }
+}
+
+impl<R: GameRunner> RoundExecutor for SequentialRoundExecutor<R> {
+    type Error = R::Error;
+
+    fn play_round(
+        &mut self,
+        round: &Round,
+        population: &BTreeMap<IndividualId, Genome>,
+        opening: &Opening,
+        config: &TrainingConfig,
+    ) -> Result<Vec<EncounterRecord>, RoundExecutionError<Self::Error>> {
+        play_round(&mut self.runner, round, population, opening, config)
+    }
+}
+
+pub struct ParallelRoundExecutor<F> {
+    factory: F,
+    workers: NonZeroUsize,
+}
+
+impl<F> ParallelRoundExecutor<F> {
+    pub fn new(factory: F, workers: NonZeroUsize) -> Self {
+        Self { factory, workers }
+    }
+}
+
+impl<F> RoundExecutor for ParallelRoundExecutor<F>
+where
+    F: GameRunnerFactory + Sync,
+    F::Runner: Send,
+    <F::Runner as GameRunner>::Error: Send,
+{
+    type Error = <F::Runner as GameRunner>::Error;
+
+    fn play_round(
+        &mut self,
+        round: &Round,
+        population: &BTreeMap<IndividualId, Genome>,
+        opening: &Opening,
+        config: &TrainingConfig,
+    ) -> Result<Vec<EncounterRecord>, RoundExecutionError<Self::Error>> {
+        if round.opening != opening.id {
+            return Err(RoundExecutionError::OpeningMismatch {
+                scheduled: round.opening,
+                supplied: opening.id,
+            });
+        }
+        for pairing in &round.pairings {
+            if !population.contains_key(&pairing.a) {
+                return Err(RoundExecutionError::MissingIndividual(pairing.a));
+            }
+            if !population.contains_key(&pairing.b) {
+                return Err(RoundExecutionError::MissingIndividual(pairing.b));
+            }
+        }
+
+        let worker_count = self.workers.get().min(round.pairings.len());
+        if worker_count <= 1 {
+            let mut runner = self.factory.create();
+            return play_round(&mut runner, round, population, opening, config);
+        }
+
+        let worker_results = std::thread::scope(|scope| {
+            let mut handles = Vec::with_capacity(worker_count);
+            for worker in 0..worker_count {
+                let factory = &self.factory;
+                handles.push(scope.spawn(move || {
+                    let mut runner = factory.create();
+                    round
+                        .pairings
+                        .iter()
+                        .enumerate()
+                        .skip(worker)
+                        .step_by(worker_count)
+                        .map(|(index, pairing)| {
+                            let a = population
+                                .get(&pairing.a)
+                                .expect("population was checked before dispatch");
+                            let b = population
+                                .get(&pairing.b)
+                                .expect("population was checked before dispatch");
+                            (
+                                index,
+                                play_encounter(&mut runner, *pairing, a, b, opening, config),
+                            )
+                        })
+                        .collect::<Vec<_>>()
+                }));
+            }
+            handles
+                .into_iter()
+                .map(|handle| handle.join())
+                .collect::<Vec<_>>()
+        });
+
+        let mut ordered = (0..round.pairings.len()).map(|_| None).collect::<Vec<_>>();
+        for worker_result in worker_results {
+            for (index, result) in worker_result.map_err(|_| RoundExecutionError::WorkerPanic)? {
+                ordered[index] = Some(result);
+            }
+        }
+        ordered
+            .into_iter()
+            .map(|result| {
+                result
+                    .expect("every dispatched pairing must produce one result")
+                    .map_err(RoundExecutionError::Game)
+            })
+            .collect()
+    }
+}
+
 #[derive(Debug, PartialEq, Eq)]
 pub enum RoundExecutionError<E> {
     OpeningMismatch {
@@ -199,6 +364,7 @@ pub enum RoundExecutionError<E> {
     },
     MissingIndividual(IndividualId),
     Game(E),
+    WorkerPanic,
 }
 
 impl<E: fmt::Display> fmt::Display for RoundExecutionError<E> {
@@ -218,6 +384,7 @@ impl<E: fmt::Display> fmt::Display for RoundExecutionError<E> {
                 )
             }
             Self::Game(source) => write!(formatter, "game execution failed: {source}"),
+            Self::WorkerPanic => formatter.write_str("parallel game worker panicked"),
         }
     }
 }
@@ -226,7 +393,7 @@ impl<E: Error + 'static> Error for RoundExecutionError<E> {
     fn source(&self) -> Option<&(dyn Error + 'static)> {
         match self {
             Self::Game(source) => Some(source),
-            Self::OpeningMismatch { .. } | Self::MissingIndividual(_) => None,
+            Self::OpeningMismatch { .. } | Self::MissingIndividual(_) | Self::WorkerPanic => None,
         }
     }
 }
@@ -245,6 +412,12 @@ fn points_for_black(outcome: GameOutcome) -> u32 {
 
 #[cfg(test)]
 mod tests {
+    use std::sync::{
+        atomic::{AtomicUsize, Ordering},
+        Arc,
+    };
+    use std::time::Duration;
+
     use super::*;
     use crate::{openings::OpeningId, pairing::IndividualId, self_play::DrawReason};
     use shakmaty::Chess;
@@ -426,6 +599,166 @@ mod tests {
         assert_eq!(records.len(), 2);
         assert_eq!(runner.calls.len(), 4);
         assert!(runner.calls.iter().all(|call| call.2 == opening.position));
+    }
+
+    #[derive(Clone)]
+    struct DrawRunnerFactory {
+        calls: Arc<AtomicUsize>,
+    }
+
+    struct ParallelDrawRunner {
+        calls: Arc<AtomicUsize>,
+    }
+
+    impl GameRunnerFactory for DrawRunnerFactory {
+        type Runner = ParallelDrawRunner;
+
+        fn create(&self) -> Self::Runner {
+            ParallelDrawRunner {
+                calls: Arc::clone(&self.calls),
+            }
+        }
+    }
+
+    impl GameRunner for ParallelDrawRunner {
+        type Error = &'static str;
+
+        fn play(
+            &mut self,
+            _white: &Genome,
+            _black: &Genome,
+            opening: &Opening,
+            _search_depth: usize,
+            _max_game_plies: usize,
+        ) -> Result<GameRecord, Self::Error> {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            Ok(GameRecord {
+                outcome: GameOutcome::Draw(DrawReason::MaxPlies),
+                moves: vec![],
+                position_history: vec![opening.position.clone()],
+                final_position: opening.position.clone(),
+            })
+        }
+    }
+
+    #[test]
+    fn parallel_round_preserves_pairing_order_and_executes_every_paired_game_once() {
+        let opening = Opening {
+            id: OpeningId(7),
+            seed: 9,
+            moves: vec![],
+            position: Chess::default(),
+        };
+        let round = Round {
+            number: 0,
+            opening: opening.id,
+            pairings: vec![
+                Pairing {
+                    a: IndividualId(0),
+                    b: IndividualId(1),
+                },
+                Pairing {
+                    a: IndividualId(2),
+                    b: IndividualId(3),
+                },
+            ],
+        };
+        let population = (0..4)
+            .map(|id| (IndividualId(id), Genome::default()))
+            .collect();
+        let config = TrainingConfig::new(3, 20, 1, 0..=0, 1).unwrap();
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut executor = ParallelRoundExecutor::new(
+            DrawRunnerFactory {
+                calls: Arc::clone(&calls),
+            },
+            NonZeroUsize::new(4).unwrap(),
+        );
+
+        let records = executor
+            .play_round(&round, &population, &opening, &config)
+            .unwrap();
+
+        assert_eq!(
+            records
+                .iter()
+                .map(|record| record.pairing)
+                .collect::<Vec<_>>(),
+            round.pairings
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 4);
+    }
+
+    struct DelayedErrorFactory;
+    struct DelayedErrorRunner;
+
+    impl GameRunnerFactory for DelayedErrorFactory {
+        type Runner = DelayedErrorRunner;
+
+        fn create(&self) -> Self::Runner {
+            DelayedErrorRunner
+        }
+    }
+
+    impl GameRunner for DelayedErrorRunner {
+        type Error = &'static str;
+
+        fn play(
+            &mut self,
+            white: &Genome,
+            _black: &Genome,
+            _opening: &Opening,
+            _search_depth: usize,
+            _max_game_plies: usize,
+        ) -> Result<GameRecord, Self::Error> {
+            if white.genes()[0] < 0.15 {
+                std::thread::sleep(Duration::from_millis(20));
+                Err("first pairing")
+            } else {
+                Err("later pairing")
+            }
+        }
+    }
+
+    #[test]
+    fn parallel_round_reports_the_first_logical_error_not_the_fastest_error() {
+        let opening = Opening {
+            id: OpeningId(0),
+            seed: 0,
+            moves: vec![],
+            position: Chess::default(),
+        };
+        let round = Round {
+            number: 0,
+            opening: opening.id,
+            pairings: vec![
+                Pairing {
+                    a: IndividualId(0),
+                    b: IndividualId(1),
+                },
+                Pairing {
+                    a: IndividualId(2),
+                    b: IndividualId(3),
+                },
+            ],
+        };
+        let population = [0.1, 1.0, 0.2, 1.0]
+            .into_iter()
+            .enumerate()
+            .map(|(id, marker)| {
+                let mut genes = [1.0; crate::GENE_COUNT];
+                genes[0] = marker;
+                (IndividualId(id as u64), Genome::new(genes).unwrap())
+            })
+            .collect();
+        let config = TrainingConfig::new(1, 1, 1, 0..=0, 1).unwrap();
+        let mut executor =
+            ParallelRoundExecutor::new(DelayedErrorFactory, NonZeroUsize::new(2).unwrap());
+
+        assert!(matches!(
+            executor.play_round(&round, &population, &opening, &config),
+            Err(RoundExecutionError::Game("first pairing"))
+        ));
     }
 
     #[test]
