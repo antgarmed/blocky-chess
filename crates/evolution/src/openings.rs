@@ -4,7 +4,10 @@ use std::{collections::HashSet, error::Error, fmt};
 
 use shakmaty::{zobrist::Zobrist128, Chess, EnPassantMode, Move, Position};
 
-use crate::training::TrainingConfig;
+use crate::{
+    rng::{derive_seed, RandomSource, StableRng},
+    training::TrainingConfig,
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct OpeningId(pub u64);
@@ -104,42 +107,6 @@ fn is_non_terminal(position: &Chess) -> bool {
 
 fn position_key(position: &Chess) -> u128 {
     position.zobrist_hash::<Zobrist128>(EnPassantMode::Legal).0
-}
-
-pub(crate) fn derive_seed(master: u64, stream: u64, attempt: u64) -> u64 {
-    let mut value = master
-        ^ stream.wrapping_mul(0x9e37_79b9_7f4a_7c15)
-        ^ attempt.wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    value = (value ^ (value >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
-    value = (value ^ (value >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
-    value ^ (value >> 31)
-}
-
-/// Small explicit SplitMix64 stream. Its algorithm is fixed here, so results
-/// do not depend on a platform RNG or a dependency changing implementation.
-pub(crate) struct StableRng(u64);
-
-impl StableRng {
-    pub(crate) fn new(seed: u64) -> Self {
-        Self(seed)
-    }
-
-    fn next(&mut self) -> u64 {
-        self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
-        derive_seed(self.0, 0, 0)
-    }
-
-    pub(crate) fn index(&mut self, length: usize) -> usize {
-        debug_assert!(length > 0);
-        // Rejection avoids modulo bias while retaining a fully stable stream.
-        let threshold = u64::MAX - u64::MAX % length as u64;
-        loop {
-            let value = self.next();
-            if value < threshold {
-                return (value % length as u64) as usize;
-            }
-        }
-    }
 }
 
 #[cfg(test)]

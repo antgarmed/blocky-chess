@@ -62,6 +62,24 @@ impl TrainingConfig {
     pub const fn max_opening_attempts(&self) -> usize {
         self.max_opening_attempts
     }
+
+    pub(crate) fn with_master_seed(&self, master_seed: u64) -> Self {
+        let mut config = self.clone();
+        config.master_seed = master_seed;
+        config
+    }
+}
+
+impl Default for TrainingConfig {
+    fn default() -> Self {
+        Self {
+            search_depth: 4,
+            max_game_plies: 200,
+            master_seed: 0,
+            opening_plies: 4..=10,
+            max_opening_attempts: 100,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -119,5 +137,14 @@ mod tests {
             TrainingConfig::new(4, 100, 1, 4..=8, 0),
             Err(TrainingConfigError::ZeroOpeningAttempts)
         );
+    }
+
+    #[test]
+    fn defaults_are_safe_and_use_the_proposed_search_depth() {
+        let config = TrainingConfig::default();
+        assert_eq!(config.search_depth(), 4);
+        assert_eq!(config.max_game_plies(), 200);
+        assert_eq!(config.opening_plies(), &(4..=10));
+        assert_eq!(config.max_opening_attempts(), 100);
     }
 }

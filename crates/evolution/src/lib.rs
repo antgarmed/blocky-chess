@@ -4,9 +4,11 @@
 //! reusable representation of an evaluation genome.
 
 pub mod encounter;
+pub mod evolution;
 pub mod genome;
 pub mod openings;
 pub mod pairing;
+pub mod rng;
 pub mod self_play;
 pub mod training;
 

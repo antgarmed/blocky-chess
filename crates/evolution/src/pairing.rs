@@ -6,7 +6,10 @@ use std::{
     fmt,
 };
 
-use crate::openings::{OpeningId, StableRng};
+use crate::{
+    openings::OpeningId,
+    rng::{RandomSource, StableRng},
+};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]
 pub struct IndividualId(pub u64);
