@@ -2,6 +2,8 @@
 
 use std::{collections::BTreeMap, error::Error, fmt};
 
+use blocky_chess::EvaluationConfig;
+
 use crate::{
     genome::Genome,
     openings::Opening,
@@ -23,6 +25,22 @@ pub trait GameRunner {
     ) -> Result<GameRecord, Self::Error>;
 }
 
+/// Runs a game from exact evaluator configurations. This is kept separate from
+/// [`GameRunner`] so external validation can benchmark the literal reference
+/// configuration without changing the genome-based training path.
+pub trait ConfiguredGameRunner {
+    type Error;
+
+    fn play_configured(
+        &mut self,
+        white: EvaluationConfig,
+        black: EvaluationConfig,
+        opening: &Opening,
+        search_depth: usize,
+        max_game_plies: usize,
+    ) -> Result<GameRecord, Self::Error>;
+}
+
 #[derive(Default)]
 pub struct ProductionGameRunner;
 
@@ -37,8 +55,29 @@ impl GameRunner for ProductionGameRunner {
         search_depth: usize,
         max_game_plies: usize,
     ) -> Result<GameRecord, Self::Error> {
-        let white = SearchMoveSelector::alpha_beta(white.to_evaluation_config(), search_depth)?;
-        let black = SearchMoveSelector::alpha_beta(black.to_evaluation_config(), search_depth)?;
+        self.play_configured(
+            white.to_evaluation_config(),
+            black.to_evaluation_config(),
+            opening,
+            search_depth,
+            max_game_plies,
+        )
+    }
+}
+
+impl ConfiguredGameRunner for ProductionGameRunner {
+    type Error = ProductionGameError;
+
+    fn play_configured(
+        &mut self,
+        white: EvaluationConfig,
+        black: EvaluationConfig,
+        opening: &Opening,
+        search_depth: usize,
+        max_game_plies: usize,
+    ) -> Result<GameRecord, Self::Error> {
+        let white = SearchMoveSelector::alpha_beta(white, search_depth)?;
+        let black = SearchMoveSelector::alpha_beta(black, search_depth)?;
         Ok(
             SelfPlayGame::from_position(opening.position.clone(), white, black, max_game_plies)
                 .play()?,
