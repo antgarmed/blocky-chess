@@ -20,6 +20,12 @@ const DEFAULT_OPENING_COUNT: usize = 20;
 const DEFAULT_VALIDATION_SEED: u64 = 0x5641_4c49_4441_5445;
 const DEFAULT_MINIMUM_MARGIN_HALF_POINTS: u32 = 1;
 
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum CandidateSelector {
+    BestEver,
+    Generation(usize),
+}
+
 /// Hyperparameters for validation. Its seed belongs to a stream independent
 /// from training and is recorded in the resulting report.
 #[derive(Clone, Debug, PartialEq, Eq)]

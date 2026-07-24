@@ -21,7 +21,7 @@ use crate::{
     self_play::{DrawReason, GameOutcome},
     telemetry::{GameObservation, GameStatistics},
     training::TrainingConfig,
-    validation::ValidationConfig,
+    validation::{CandidateSelector, ValidationConfig},
 };
 
 pub const PERSISTENCE_FORMAT: &str = "blocky-evolution";
@@ -115,6 +115,20 @@ pub fn read_checkpoint(
     let state: EvolutionState = document.state.try_into()?;
     validate_checkpoint_state(&state, expected_config)?;
     Ok(state)
+}
+
+/// Reads a checkpoint together with the configuration embedded in it.
+pub fn read_checkpoint_unchecked_config(
+    path: &Path,
+) -> Result<(EvolutionConfig, EvolutionState), PersistenceError> {
+    let bytes = fs::read(path).map_err(|source| io_error("read", path, source))?;
+    let document: CheckpointDocument =
+        serde_json::from_slice(&bytes).map_err(PersistenceError::InvalidJson)?;
+    verify_header(&document.format, document.version)?;
+    let config: EvolutionConfig = document.evolution_config.try_into()?;
+    let state: EvolutionState = document.state.try_into()?;
+    validate_checkpoint_state(&state, &config)?;
+    Ok((config, state))
 }
 
 fn validate_checkpoint_state(
@@ -298,6 +312,38 @@ impl From<&EvolutionConfig> for EvolutionConfigData {
             mutation_step: config.mutation_step(),
             strong_mutation_step: config.strong_mutation_step(),
         }
+    }
+}
+
+impl TryFrom<EvolutionConfigData> for EvolutionConfig {
+    type Error = PersistenceError;
+
+    fn try_from(value: EvolutionConfigData) -> Result<Self, Self::Error> {
+        let training = TrainingConfig::new(
+            value.training.search_depth,
+            value.training.max_game_plies,
+            value.training.master_seed,
+            value.training.opening_min_plies..=value.training.opening_max_plies,
+            value.training.max_opening_attempts,
+        )
+        .map_err(|error| {
+            PersistenceError::CorruptData(format!("invalid training config: {error}"))
+        })?;
+        EvolutionConfig::new(
+            training,
+            value.generations,
+            value.population_size,
+            value.swiss_rounds,
+            value.elite_count,
+            value.parent_candidate_count,
+            value.gene_mutation_probability,
+            value.strong_mutation_probability,
+            value.mutation_step,
+            value.strong_mutation_step,
+        )
+        .map_err(|error| {
+            PersistenceError::CorruptData(format!("invalid evolution config: {error}"))
+        })
     }
 }
 
@@ -512,6 +558,53 @@ struct ValidationData {
 }
 
 #[derive(Serialize)]
+struct StandaloneValidationDocument {
+    format: String,
+    version: u32,
+    training_seed: u64,
+    selector: StandaloneSelectorData,
+    candidate: EvaluatedIndividualData,
+    validation_config: ValidationConfigData,
+    validation: ValidationData,
+}
+
+#[derive(Serialize)]
+#[serde(tag = "kind", rename_all = "kebab-case")]
+enum StandaloneSelectorData {
+    BestEver,
+    Generation {
+        human_generation: usize,
+        stored_generation_index: usize,
+    },
+}
+
+pub fn write_validation_report(
+    path: &Path,
+    training_seed: u64,
+    selector: &CandidateSelector,
+    candidate: &EvaluatedIndividual,
+    report: &crate::validation::ValidationReport,
+) -> Result<(), PersistenceError> {
+    let selector = match selector {
+        CandidateSelector::BestEver => StandaloneSelectorData::BestEver,
+        CandidateSelector::Generation(human_generation) => StandaloneSelectorData::Generation {
+            human_generation: *human_generation,
+            stored_generation_index: human_generation - 1,
+        },
+    };
+    let document = StandaloneValidationDocument {
+        format: "blocky-evolution-validation".to_owned(),
+        version: 1,
+        training_seed,
+        selector,
+        candidate: EvaluatedIndividualData::from(candidate),
+        validation_config: ValidationConfigData::from(&report.config),
+        validation: ValidationData::from(report),
+    };
+    write_json_atomically(path, &document)
+}
+
+#[derive(Serialize)]
 struct DepthValidationData {
     search_depth: usize,
     candidate_score_half_points: u32,
@@ -604,7 +697,12 @@ impl From<GameStatistics> for GameStatisticsData {
 
 impl From<&ExperimentReport> for ValidationData {
     fn from(report: &ExperimentReport) -> Self {
-        let validation = report.validation();
+        Self::from(report.validation())
+    }
+}
+
+impl From<&crate::validation::ValidationReport> for ValidationData {
+    fn from(validation: &crate::validation::ValidationReport) -> Self {
         Self {
             candidate_score_half_points: validation.candidate_score.0,
             reference_score_half_points: validation.reference_score.0,

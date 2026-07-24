@@ -307,6 +307,11 @@ validation is exploratory and must not influence which individual is declared
 the run's champion; the best-ever training individual remains the champion
 selected by the implemented algorithm.
 
+The standalone `validate --generation N` interface uses human, one-based
+generation numbers (`N = 1` maps to stored history index `0`). Omitting the
+option selects `best-ever`. Its JSON output is a separate, versioned validation
+document rather than a complete training experiment report.
+
 ## 13. Random-Search Control Experiment
 
 A later experiment should determine whether the evolutionary operators add

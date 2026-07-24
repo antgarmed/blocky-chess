@@ -16,6 +16,17 @@ fn help_succeeds_and_describes_training() {
 }
 
 #[test]
+fn validate_help_succeeds_without_printing_an_error() {
+    let output = binary().args(["validate", "--help"]).output().unwrap();
+
+    assert!(output.status.success());
+    assert!(String::from_utf8(output.stdout)
+        .unwrap()
+        .contains("blocky-evolution validate"));
+    assert!(output.stderr.is_empty());
+}
+
+#[test]
 fn invalid_arguments_have_usage_exit_code_and_clear_error() {
     let output = binary()
         .args(["train", "--population-size", "3"])
@@ -182,4 +193,72 @@ fn training_only_stops_after_checkpoint_without_validation_or_report() {
     assert!(!report.exists());
 
     fs::remove_file(checkpoint).unwrap();
+}
+
+#[test]
+fn standalone_validation_uses_checkpoint_without_retraining() {
+    let directory = std::env::temp_dir();
+    let checkpoint = directory.join(format!(
+        "blocky-cli-{}-validate-checkpoint.json",
+        std::process::id()
+    ));
+    let report = directory.join(format!("blocky-cli-{}-validation.json", std::process::id()));
+    let mut train = binary();
+    minimal_training(&mut train);
+    let output = train
+        .args(["--workers", "1", "--training-only"])
+        .arg("--checkpoint")
+        .arg(&checkpoint)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+
+    let output = binary()
+        .args([
+            "validate",
+            "--workers",
+            "1",
+            "--validation-depths",
+            "1",
+            "--validation-openings",
+            "1",
+            "--validation-max-game-plies",
+            "1",
+            "--validation-opening-min-plies",
+            "0",
+            "--validation-opening-max-plies",
+            "0",
+            "--validation-seed",
+            "99",
+        ])
+        .arg("--checkpoint")
+        .arg(&checkpoint)
+        .arg("--report")
+        .arg(&report)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let json: serde_json::Value = serde_json::from_slice(&fs::read(&report).unwrap()).unwrap();
+    assert_eq!(json["format"], "blocky-evolution-validation");
+    assert_eq!(json["version"], 1);
+    assert_eq!(json["selector"]["kind"], "best-ever");
+    assert!(json["candidate"]["individual"]["genes"].is_array());
+    assert_eq!(
+        json["validation"]["by_depth"][0]["openings"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+
+    fs::remove_file(checkpoint).unwrap();
+    fs::remove_file(report).unwrap();
 }

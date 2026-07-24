@@ -99,4 +99,19 @@ statistics for training and both color-swapped validation games. Use
 champion validation; it completes training and writes the configured
 checkpoint, but skips validation and report export.
 
+Validate a frozen checkpoint later, without retraining:
+
+```bash
+cargo run --release -p blocky-evolution -- validate \
+  --checkpoint training.json --report validation.json \
+  --workers 16 --validation-depths 4,6 --validation-openings 20
+```
+
+The candidate defaults to `best-ever`. To inspect a generation snapshot, add
+`--generation N`: `N` is the human, one-based generation number, so generation
+`1` selects stored history index `0`. Validation always plays the selected
+candidate against the literal `EvaluationConfig::default()` on held-out
+openings with colors swapped. Its validation seed must differ from the
+training seed embedded in the checkpoint.
+
 The evaluation can be tuned through UCI spin options. Material values are exposed as `PawnValue`, `KnightValue`, `BishopValue`, `RookValue`, and `QueenValue` (range 0–1000). Mobility and king-safety weights are also configurable through `MobilityWeight`, the mobility weights for each piece type, and `KingSafetyWeight` (range 0–100).

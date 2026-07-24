@@ -2,13 +2,17 @@ use std::{env, process::ExitCode};
 
 use blocky_evolution::{
     cli::{
-        render_summary, write_stdout_line, Command, ConsoleProgressObserver, TrainCommand, HELP,
+        render_summary, write_stdout_line, Command, ConsoleProgressObserver, TrainCommand,
+        ValidateCommand, HELP,
     },
     encounter::ProductionGameRunner,
     evolution::{EvolutionEngine, SelfPlayPopulationEvaluator},
     experiment::ExperimentReport,
-    persistence::{read_checkpoint, write_checkpoint, write_experiment_report},
-    validation::ChampionValidator,
+    persistence::{
+        read_checkpoint, read_checkpoint_unchecked_config, write_checkpoint,
+        write_experiment_report, write_validation_report,
+    },
+    validation::{CandidateSelector, ChampionValidator},
 };
 
 fn main() -> ExitCode {
@@ -25,7 +29,63 @@ fn main() -> ExitCode {
             ExitCode::SUCCESS
         }
         Command::Train(command) => run_train(*command),
+        Command::Validate(command) => run_validate(*command),
     }
+}
+
+fn run_validate(command: ValidateCommand) -> ExitCode {
+    let (evolution_config, state) = match read_checkpoint_unchecked_config(&command.checkpoint) {
+        Ok(data) => data,
+        Err(error) => {
+            eprintln!("error: could not read checkpoint: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let training_seed = evolution_config.training().master_seed();
+    if training_seed == command.validation.master_seed() {
+        eprintln!("error: training and validation seeds must be different");
+        return ExitCode::from(2);
+    }
+    let candidate = match &command.selector {
+        CandidateSelector::BestEver => state.best_ever(),
+        CandidateSelector::Generation(human) => match state.generations().get(human - 1) {
+            Some(generation) => generation.best(),
+            None => {
+                eprintln!(
+                    "error: generation {human} is unavailable; checkpoint contains {} completed generations",
+                    state.generations().len()
+                );
+                return ExitCode::from(2);
+            }
+        },
+    };
+    let mut validator = ChampionValidator::production_parallel(
+        command.validation,
+        command.workers,
+        Box::new(ConsoleProgressObserver::default()),
+    );
+    let validation = match validator.validate(candidate.individual().genome()) {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("error: validation failed: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Err(error) = write_validation_report(
+        &command.report,
+        training_seed,
+        &command.selector,
+        candidate,
+        &validation,
+    ) {
+        eprintln!("error: could not export validation report: {error}");
+        return ExitCode::FAILURE;
+    }
+    write_stdout_line(&format!(
+        "Validation complete: candidate {}, reference {}",
+        validation.candidate_score.0, validation.reference_score.0
+    ));
+    ExitCode::SUCCESS
 }
 
 fn run_train(command: TrainCommand) -> ExitCode {

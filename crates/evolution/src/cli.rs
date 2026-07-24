@@ -15,7 +15,7 @@ use crate::{
     experiment::ExperimentReport,
     progress::{ProgressEvent, ProgressObserver},
     training::{TrainingConfig, TrainingConfigError},
-    validation::{ValidationConfig, ValidationConfigError},
+    validation::{CandidateSelector, ValidationConfig, ValidationConfigError},
 };
 
 pub const HELP: &str = "\
@@ -23,6 +23,7 @@ Train Blocky Chess evaluation parameters through deterministic self-play
 
 Usage:
   blocky-evolution train [OPTIONS]
+  blocky-evolution validate --checkpoint PATH --report PATH [OPTIONS]
   blocky-evolution --help
 
 Evolution:
@@ -47,6 +48,8 @@ Training games:
   --max-opening-attempts N                [default: 100]
 
 Champion validation:
+  --candidate best-ever                   Standalone candidate [default: best-ever]
+  --generation N                          Human generation number (1 maps to stored index 0)
   --validation-depths N,N                 [default: 4,6]
   --validation-openings N                 [default: 20]
   --validation-max-game-plies N           [default: 200]
@@ -69,6 +72,16 @@ Persistence:
 pub enum Command {
     Help,
     Train(Box<TrainCommand>),
+    Validate(Box<ValidateCommand>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct ValidateCommand {
+    pub checkpoint: PathBuf,
+    pub report: PathBuf,
+    pub selector: CandidateSelector,
+    pub validation: ValidationConfig,
+    pub workers: NonZeroUsize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -90,8 +103,16 @@ impl TrainCommand {
         S: Into<String>,
     {
         let args = args.into_iter().map(Into::into).collect::<Vec<_>>();
+        if args.iter().any(|arg| arg == "-h" || arg == "--help") {
+            return Ok(Command::Help);
+        }
         match args.first().map(String::as_str) {
             Some("-h" | "--help") => return Ok(Command::Help),
+            Some("validate") => {
+                return ValidateCommand::parse(&args)
+                    .map(Box::new)
+                    .map(Command::Validate)
+            }
             Some("train") => {}
             Some(command) => return Err(CliError::UnknownCommand(command.to_owned())),
             None => return Err(CliError::MissingCommand),
@@ -119,6 +140,72 @@ impl TrainCommand {
     }
 }
 
+impl ValidateCommand {
+    fn parse(args: &[String]) -> Result<Self, CliError> {
+        let mut values = RawValues::default();
+        let mut checkpoint = None;
+        let mut report = None;
+        let mut selector = CandidateSelector::BestEver;
+        let mut explicit_best_ever = false;
+        let mut explicit_generation = false;
+        let mut index = 1;
+        while index < args.len() {
+            let flag = &args[index];
+            let value = args
+                .get(index + 1)
+                .ok_or_else(|| CliError::MissingValue(flag.clone()))?;
+            match flag.as_str() {
+                "--checkpoint" => checkpoint = Some(PathBuf::from(value)),
+                "--report" => report = Some(PathBuf::from(value)),
+                "--candidate" if value == "best-ever" => {
+                    if explicit_generation {
+                        return Err(CliError::ConflictingCandidateSelectors);
+                    }
+                    explicit_best_ever = true;
+                    selector = CandidateSelector::BestEver;
+                }
+                "--generation" => {
+                    if explicit_best_ever {
+                        return Err(CliError::ConflictingCandidateSelectors);
+                    }
+                    let generation = parse(flag, value, "a positive human generation number")?;
+                    if generation == 0 {
+                        return Err(CliError::ZeroGenerationSelector);
+                    }
+                    explicit_generation = true;
+                    selector = CandidateSelector::Generation(generation);
+                }
+                "--workers"
+                | "--validation-depths"
+                | "--validation-openings"
+                | "--validation-max-game-plies"
+                | "--validation-seed"
+                | "--validation-opening-min-plies"
+                | "--validation-opening-max-plies"
+                | "--validation-max-opening-attempts"
+                | "--validation-minimum-margin-half-points" => values.set(flag, value)?,
+                "--candidate" => {
+                    return Err(CliError::InvalidValue {
+                        option: flag.clone(),
+                        value: value.clone(),
+                        expected: "`best-ever`",
+                    })
+                }
+                _ => return Err(CliError::UnknownOption(flag.clone())),
+            }
+            index += 2;
+        }
+        let (validation, workers) = values.build_validation()?;
+        Ok(Self {
+            checkpoint: checkpoint.ok_or(CliError::MissingRequiredOption("--checkpoint"))?,
+            report: report.ok_or(CliError::MissingRequiredOption("--report"))?,
+            selector,
+            validation,
+            workers,
+        })
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum CliError {
     MissingCommand,
@@ -135,6 +222,9 @@ pub enum CliError {
     ValidationConfig(ValidationConfigError),
     ZeroWorkers,
     ZeroCheckpointFrequency,
+    MissingRequiredOption(&'static str),
+    ZeroGenerationSelector,
+    ConflictingCandidateSelectors,
 }
 
 impl fmt::Display for CliError {
@@ -177,6 +267,14 @@ impl fmt::Display for CliError {
                 formatter.write_str("checkpoint frequency must be greater than zero")
             }
             Self::ZeroWorkers => formatter.write_str("worker count must be greater than zero"),
+            Self::MissingRequiredOption(option) => {
+                write!(formatter, "required option `{option}` is missing")
+            }
+            Self::ZeroGenerationSelector => {
+                formatter.write_str("generation selector is 1-based and must be greater than zero")
+            }
+            Self::ConflictingCandidateSelectors => formatter
+                .write_str("`--candidate best-ever` and `--generation` are mutually exclusive"),
         }
     }
 }
@@ -313,6 +411,24 @@ impl Default for RawValues {
 }
 
 impl RawValues {
+    fn build_validation(&self) -> Result<(ValidationConfig, NonZeroUsize), CliError> {
+        let workers = NonZeroUsize::new(self.workers).ok_or(CliError::ZeroWorkers)?;
+        let validation = ValidationConfig::new(
+            self.validation_depths.clone(),
+            self.validation_openings,
+            self.validation_max_game_plies,
+            self.validation_seed,
+            range(
+                self.validation_opening_min_plies,
+                self.validation_opening_max_plies,
+            ),
+            self.validation_max_opening_attempts,
+            self.validation_minimum_margin_half_points,
+        )
+        .map_err(CliError::ValidationConfig)?;
+        Ok((validation, workers))
+    }
+
     fn set(&mut self, option: &str, value: &str) -> Result<(), CliError> {
         macro_rules! number {
             ($field:ident, $expected:literal) => {
@@ -380,7 +496,7 @@ impl RawValues {
         if self.checkpoint_every == 0 {
             return Err(CliError::ZeroCheckpointFrequency);
         }
-        let workers = NonZeroUsize::new(self.workers).ok_or(CliError::ZeroWorkers)?;
+        let (validation, workers) = self.build_validation()?;
         let training = TrainingConfig::new(
             self.search_depth,
             self.max_game_plies,
@@ -402,19 +518,6 @@ impl RawValues {
             self.strong_mutation_step,
         )
         .map_err(CliError::EvolutionConfig)?;
-        let validation = ValidationConfig::new(
-            self.validation_depths,
-            self.validation_openings,
-            self.validation_max_game_plies,
-            self.validation_seed,
-            range(
-                self.validation_opening_min_plies,
-                self.validation_opening_max_plies,
-            ),
-            self.validation_max_opening_attempts,
-            self.validation_minimum_margin_half_points,
-        )
-        .map_err(CliError::ValidationConfig)?;
         Ok(TrainCommand {
             evolution,
             validation,
@@ -681,7 +784,7 @@ mod tests {
     fn train(args: &[&str]) -> TrainCommand {
         match TrainCommand::from_args(args.iter().copied()).unwrap() {
             Command::Train(command) => *command,
-            Command::Help => panic!("expected train command"),
+            Command::Help | Command::Validate(_) => panic!("expected train command"),
         }
     }
 
@@ -909,5 +1012,78 @@ mod tests {
             }),
             "Validation completed: candidate 21, reference 19, accepted"
         );
+    }
+
+    #[test]
+    fn parses_standalone_validation_selectors() {
+        let command = TrainCommand::from_args([
+            "validate",
+            "--checkpoint",
+            "checkpoint.json",
+            "--report",
+            "validation.json",
+            "--workers",
+            "2",
+            "--validation-depths",
+            "1,2",
+        ])
+        .unwrap();
+        let Command::Validate(command) = command else {
+            panic!("expected validate")
+        };
+        assert_eq!(command.selector, CandidateSelector::BestEver);
+        assert_eq!(command.validation.search_depths(), &[1, 2]);
+
+        let command = TrainCommand::from_args([
+            "validate",
+            "--checkpoint",
+            "checkpoint.json",
+            "--report",
+            "validation.json",
+            "--generation",
+            "25",
+        ])
+        .unwrap();
+        let Command::Validate(command) = command else {
+            panic!("expected validate")
+        };
+        assert_eq!(command.selector, CandidateSelector::Generation(25));
+    }
+
+    #[test]
+    fn rejects_zero_human_generation_selector() {
+        assert_eq!(
+            TrainCommand::from_args([
+                "validate",
+                "--checkpoint",
+                "checkpoint.json",
+                "--report",
+                "validation.json",
+                "--generation",
+                "0",
+            ]),
+            Err(CliError::ZeroGenerationSelector)
+        );
+    }
+
+    #[test]
+    fn standalone_candidate_selectors_are_mutually_exclusive_in_any_order() {
+        for selector_options in [
+            ["--candidate", "best-ever", "--generation", "2"],
+            ["--generation", "2", "--candidate", "best-ever"],
+        ] {
+            let mut args = vec![
+                "validate",
+                "--checkpoint",
+                "checkpoint.json",
+                "--report",
+                "validation.json",
+            ];
+            args.extend(selector_options);
+            assert_eq!(
+                TrainCommand::from_args(args),
+                Err(CliError::ConflictingCandidateSelectors)
+            );
+        }
     }
 }
