@@ -3,6 +3,7 @@
   "purpose": "Production evolutionary run 1 of 10",
   "source_revision_before_run_setup": "c830684c7a75f034cf363187f5c6c19b5ee76b60",
   "execution_revision": "ff61531",
+  "batch_2_execution_revision": "e45bf95",
   "build_profile": "release",
   "workers": 16,
   "cpu": "13th Gen Intel(R) Core(TM) i9-13900HX (2.20 GHz)",
