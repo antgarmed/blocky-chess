@@ -1,0 +1,22 @@
+{
+  "run_id": "calibration-20260724-depth4",
+  "purpose": "One-generation production-configuration runtime calibration",
+  "git_commit": "db0ced656ea18861fbb14cf630ad60a5e71c937b",
+  "git_branch": "main",
+  "git_worktree_clean_before_artifact_creation": true,
+  "build_profile": "release",
+  "workers": 32,
+  "logical_processors": 32,
+  "operating_system": "Microsoft Windows 10.0.26200",
+  "os_architecture": "x64",
+  "process_architecture": "x64",
+  "rustc": "1.97.1 (8bab26f4f 2026-07-14)",
+  "cargo": "1.97.1 (c980f4866 2026-06-30)",
+  "rust_host": "x86_64-pc-windows-msvc",
+  "llvm": "22.1.6",
+  "training_games_expected": 160,
+  "notes": [
+    "The exact CPU model was unavailable because Windows denied the unprivileged CIM query.",
+    "Validation is intentionally reduced to one depth-1 opening with two plies; it is not part of the calibration measurement."
+  ]
+}
