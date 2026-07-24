@@ -53,7 +53,7 @@ fn run_train(command: TrainCommand) -> ExitCode {
     let mut trainer = EvolutionEngine::with_observer(
         command.evolution,
         SelfPlayPopulationEvaluator::parallel(ProductionGameRunner, command.workers),
-        Box::new(ConsoleProgressObserver),
+        Box::new(ConsoleProgressObserver::default()),
     );
     let save = |state: &blocky_evolution::evolution::EvolutionState| {
         let should_save = state.next_generation().is_multiple_of(frequency)
@@ -80,7 +80,7 @@ fn run_train(command: TrainCommand) -> ExitCode {
     let mut validator = ChampionValidator::production_parallel(
         command.validation,
         command.workers,
-        Box::new(ConsoleProgressObserver),
+        Box::new(ConsoleProgressObserver::default()),
     );
     let validation = match validator.validate(evolution.best_ever().individual().genome()) {
         Ok(report) => report,

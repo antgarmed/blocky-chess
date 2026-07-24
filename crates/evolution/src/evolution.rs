@@ -17,6 +17,7 @@ use crate::{
     pairing::{IndividualId, PairingError, Score, Standing, SwissScheduler},
     progress::{NoopProgressObserver, ProgressEvent, ProgressObserver},
     rng::{derive_seed, RandomSource, StableRng},
+    telemetry::GameStatistics,
     training::TrainingConfig,
 };
 
@@ -505,6 +506,8 @@ impl<E: RoundExecutor> PopulationEvaluator for SelfPlayPopulationEvaluator<E> {
             derive_seed(seed, 1, 0),
         )
         .map_err(SelfPlayEvaluationError::Pairing)?;
+        let mut generation_games =
+            Vec::with_capacity(config.population_size() * config.swiss_rounds());
 
         for (round_index, opening) in openings.openings().iter().enumerate() {
             let round = scheduler
@@ -514,6 +517,17 @@ impl<E: RoundExecutor> PopulationEvaluator for SelfPlayPopulationEvaluator<E> {
                 .executor
                 .play_round(&round, &genomes, opening, &training)
                 .map_err(SelfPlayEvaluationError::Round)?;
+            let statistics = GameStatistics::from_records(
+                records
+                    .iter()
+                    .flat_map(|record| [&record.first_game, &record.second_game]),
+            );
+            generation_games.extend(records.iter().flat_map(|record| {
+                [
+                    (record.first_game.outcome, record.first_game.moves.len()),
+                    (record.second_game.outcome, record.second_game.moves.len()),
+                ]
+            }));
             let scores: BTreeMap<_, _> = records
                 .into_iter()
                 .flat_map(|record| {
@@ -531,8 +545,13 @@ impl<E: RoundExecutor> PopulationEvaluator for SelfPlayPopulationEvaluator<E> {
                 round: round_index,
                 total_rounds: openings.openings().len(),
                 opening: opening.id,
+                statistics,
             });
         }
+        observer.on_event(ProgressEvent::SelfPlayGenerationCompleted {
+            generation,
+            statistics: GameStatistics::from_outcomes_and_plies(generation_games),
+        });
         Ok(standings)
     }
 }

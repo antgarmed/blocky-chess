@@ -14,6 +14,7 @@ pub mod persistence;
 pub mod progress;
 pub mod rng;
 pub mod self_play;
+pub mod telemetry;
 pub mod training;
 pub mod validation;
 

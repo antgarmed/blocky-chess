@@ -3,6 +3,7 @@
 use crate::{
     openings::OpeningId,
     pairing::{IndividualId, Score},
+    telemetry::GameStatistics,
 };
 
 /// A stable, domain-level description of work completed by an experiment.
@@ -25,6 +26,11 @@ pub enum ProgressEvent {
         round: usize,
         total_rounds: usize,
         opening: OpeningId,
+        statistics: GameStatistics,
+    },
+    SelfPlayGenerationCompleted {
+        generation: usize,
+        statistics: GameStatistics,
     },
     GenerationCompleted {
         generation: usize,
@@ -57,6 +63,7 @@ pub enum ProgressEvent {
         candidate_score: Score,
         reference_score: Score,
         accepted: bool,
+        statistics: GameStatistics,
     },
     ValidationCompleted {
         candidate_score: Score,

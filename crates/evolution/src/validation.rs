@@ -12,6 +12,7 @@ use crate::{
     pairing::Score,
     progress::{NoopProgressObserver, ProgressEvent, ProgressObserver},
     self_play::GameOutcome,
+    telemetry::{GameObservation, GameStatistics},
     training::{TrainingConfig, TrainingConfigError},
 };
 
@@ -145,6 +146,7 @@ pub struct OpeningValidationResult {
     pub opening_seed: u64,
     pub candidate_score: Score,
     pub reference_score: Score,
+    pub games: [GameObservation; 2],
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -331,11 +333,16 @@ fn play_validation_opening<R: ConfiguredGameRunner>(
     let second =
         runner.play_configured(reference, candidate, opening, search_depth, max_game_plies)?;
     let candidate_score = Score(points_for_white(first.outcome) + points_for_black(second.outcome));
+    let games = [
+        GameObservation::from(&first),
+        GameObservation::from(&second),
+    ];
     Ok(OpeningValidationResult {
         opening: opening.id,
         opening_seed: opening.seed,
         candidate_score,
         reference_score: Score(4 - candidate_score.0),
+        games,
     })
 }
 
@@ -427,6 +434,8 @@ impl<E: ValidationExecutor> ChampionValidator<E> {
                 Score(openings.iter().map(|result| result.candidate_score.0).sum());
             let reference_score =
                 Score(openings.iter().map(|result| result.reference_score.0).sum());
+            let statistics =
+                GameStatistics::from_observations(openings.iter().flat_map(|result| result.games));
             for (opening_index, opening) in pool.openings().iter().enumerate() {
                 self.observer
                     .on_event(ProgressEvent::ValidationOpeningCompleted {
@@ -446,6 +455,7 @@ impl<E: ValidationExecutor> ChampionValidator<E> {
                     candidate_score,
                     reference_score,
                     accepted,
+                    statistics,
                 });
             by_depth.push(DepthValidationResult {
                 search_depth: depth,

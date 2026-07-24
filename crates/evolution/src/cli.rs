@@ -1,6 +1,8 @@
 //! Thin command-line adapter for configuring and reporting an experiment.
 
-use std::{error::Error, fmt, num::NonZeroUsize, ops::RangeInclusive, path::PathBuf};
+use std::{
+    error::Error, fmt, num::NonZeroUsize, ops::RangeInclusive, path::PathBuf, time::Instant,
+};
 
 use crate::{
     evolution::{EvolutionConfig, EvolutionConfigError},
@@ -471,11 +473,51 @@ pub fn render_summary(report: &ExperimentReport) -> String {
 
 /// Human-readable progress adapter for interactive command-line runs.
 #[derive(Default)]
-pub struct ConsoleProgressObserver;
+pub struct ConsoleProgressObserver {
+    generation_started: Option<(usize, Instant)>,
+    validation_depth_started: Option<(usize, Instant)>,
+}
 
 impl ProgressObserver for ConsoleProgressObserver {
     fn on_event(&mut self, event: ProgressEvent) {
         eprintln!("{}", render_progress(event));
+        match event {
+            ProgressEvent::GenerationStarted { generation, .. } => {
+                self.generation_started = Some((generation, Instant::now()));
+            }
+            ProgressEvent::SelfPlayGenerationCompleted {
+                generation,
+                statistics,
+            } => {
+                if let Some((started_generation, started)) = self.generation_started {
+                    if started_generation == generation {
+                        eprintln!(
+                            "Generation {} telemetry: {}",
+                            generation + 1,
+                            render_timed_statistics(statistics, started.elapsed().as_secs_f64())
+                        );
+                    }
+                }
+            }
+            ProgressEvent::ValidationDepthStarted { search_depth, .. } => {
+                self.validation_depth_started = Some((search_depth, Instant::now()));
+            }
+            ProgressEvent::ValidationDepthCompleted {
+                search_depth,
+                statistics,
+                ..
+            } => {
+                if let Some((started_depth, started)) = self.validation_depth_started {
+                    if started_depth == search_depth {
+                        eprintln!(
+                            "Validation depth {search_depth} telemetry: {}",
+                            render_timed_statistics(statistics, started.elapsed().as_secs_f64())
+                        );
+                    }
+                }
+            }
+            _ => {}
+        }
     }
 }
 
@@ -494,11 +536,21 @@ pub fn render_progress(event: ProgressEvent) -> String {
             round,
             total_rounds,
             opening,
+            statistics,
         } => format!(
-            "Generation {}: Swiss round {}/{total_rounds} completed (opening {})",
+            "Generation {}: Swiss round {}/{total_rounds} completed (opening {}, {} games)",
             generation + 1,
             round + 1,
-            opening.0
+            opening.0,
+            statistics.games
+        ),
+        ProgressEvent::SelfPlayGenerationCompleted {
+            generation,
+            statistics,
+        } => format!(
+            "Generation {} self-play completed: {}",
+            generation + 1,
+            render_statistics(statistics)
         ),
         ProgressEvent::GenerationCompleted {
             generation,
@@ -549,11 +601,13 @@ pub fn render_progress(event: ProgressEvent) -> String {
             candidate_score,
             reference_score,
             accepted,
+            statistics,
         } => format!(
-            "Validation depth {search_depth} completed: candidate {}, reference {}, {}",
+            "Validation depth {search_depth} completed: candidate {}, reference {}, {}; {}",
             candidate_score.points(),
             reference_score.points(),
-            verdict(accepted)
+            verdict(accepted),
+            render_statistics(statistics)
         ),
         ProgressEvent::ValidationCompleted {
             candidate_score,
@@ -566,6 +620,43 @@ pub fn render_progress(event: ProgressEvent) -> String {
             verdict(accepted)
         ),
     }
+}
+
+fn render_statistics(statistics: crate::telemetry::GameStatistics) -> String {
+    format!(
+        "{} games, W/B/D {}/{}/{}, draws [stalemate {}, insufficient {}, repetition {}, 50-move {}, max-plies {}], plies mean {:.1}, min/p50/p95/max {}/{}/{}/{}",
+        statistics.games,
+        statistics.white_wins,
+        statistics.black_wins,
+        statistics.draws,
+        statistics.stalemates,
+        statistics.insufficient_material,
+        statistics.threefold_repetitions,
+        statistics.fifty_move_rule,
+        statistics.max_plies_draws,
+        statistics.mean_plies(),
+        statistics.minimum_plies,
+        statistics.median_plies,
+        statistics.p95_plies,
+        statistics.maximum_plies,
+    )
+}
+
+fn render_timed_statistics(
+    statistics: crate::telemetry::GameStatistics,
+    elapsed_seconds: f64,
+) -> String {
+    let throughput = if elapsed_seconds > 0.0 {
+        statistics.games as f64 / elapsed_seconds
+    } else {
+        0.0
+    };
+    format!(
+        "{}; elapsed {:.3}s, {:.3} games/s",
+        render_statistics(statistics),
+        elapsed_seconds,
+        throughput
+    )
 }
 
 fn verdict(accepted: bool) -> &'static str {
@@ -778,8 +869,12 @@ mod tests {
                 round: 2,
                 total_rounds: 5,
                 opening: OpeningId(7),
+                statistics: crate::telemetry::GameStatistics {
+                    games: 32,
+                    ..crate::telemetry::GameStatistics::default()
+                },
             }),
-            "Generation 2: Swiss round 3/5 completed (opening 7)"
+            "Generation 2: Swiss round 3/5 completed (opening 7, 32 games)"
         );
         assert_eq!(
             render_progress(ProgressEvent::GenerationCompleted {

@@ -18,6 +18,8 @@ use crate::{
     experiment::ExperimentReport,
     genome::{Genome, GENE_COUNT},
     pairing::{IndividualId, Score},
+    self_play::{DrawReason, GameOutcome},
+    telemetry::{GameObservation, GameStatistics},
     training::TrainingConfig,
     validation::ValidationConfig,
 };
@@ -515,6 +517,7 @@ struct DepthValidationData {
     candidate_score_half_points: u32,
     reference_score_half_points: u32,
     accepted: bool,
+    statistics: GameStatisticsData,
     openings: Vec<OpeningValidationData>,
 }
 
@@ -524,6 +527,79 @@ struct OpeningValidationData {
     opening_seed: u64,
     candidate_score_half_points: u32,
     reference_score_half_points: u32,
+    games: [GameObservationData; 2],
+}
+
+#[derive(Serialize)]
+struct GameObservationData {
+    outcome: &'static str,
+    draw_reason: Option<&'static str>,
+    plies: usize,
+}
+
+impl From<GameObservation> for GameObservationData {
+    fn from(game: GameObservation) -> Self {
+        let (outcome, draw_reason) = match game.outcome {
+            GameOutcome::WhiteWin => ("white_win", None),
+            GameOutcome::BlackWin => ("black_win", None),
+            GameOutcome::Draw(reason) => (
+                "draw",
+                Some(match reason {
+                    DrawReason::Stalemate => "stalemate",
+                    DrawReason::InsufficientMaterial => "insufficient_material",
+                    DrawReason::ThreefoldRepetition => "threefold_repetition",
+                    DrawReason::FiftyMoveRule => "fifty_move_rule",
+                    DrawReason::MaxPlies => "max_plies",
+                }),
+            ),
+        };
+        Self {
+            outcome,
+            draw_reason,
+            plies: game.plies,
+        }
+    }
+}
+
+#[derive(Serialize)]
+struct GameStatisticsData {
+    games: usize,
+    white_wins: usize,
+    black_wins: usize,
+    draws: usize,
+    stalemates: usize,
+    insufficient_material: usize,
+    threefold_repetitions: usize,
+    fifty_move_rule: usize,
+    max_plies_draws: usize,
+    total_plies: usize,
+    mean_plies: f64,
+    minimum_plies: usize,
+    median_plies: usize,
+    p95_plies: usize,
+    maximum_plies: usize,
+}
+
+impl From<GameStatistics> for GameStatisticsData {
+    fn from(statistics: GameStatistics) -> Self {
+        Self {
+            games: statistics.games,
+            white_wins: statistics.white_wins,
+            black_wins: statistics.black_wins,
+            draws: statistics.draws,
+            stalemates: statistics.stalemates,
+            insufficient_material: statistics.insufficient_material,
+            threefold_repetitions: statistics.threefold_repetitions,
+            fifty_move_rule: statistics.fifty_move_rule,
+            max_plies_draws: statistics.max_plies_draws,
+            total_plies: statistics.total_plies,
+            mean_plies: statistics.mean_plies(),
+            minimum_plies: statistics.minimum_plies,
+            median_plies: statistics.median_plies,
+            p95_plies: statistics.p95_plies,
+            maximum_plies: statistics.maximum_plies,
+        }
+    }
 }
 
 impl From<&ExperimentReport> for ValidationData {
@@ -541,6 +617,9 @@ impl From<&ExperimentReport> for ValidationData {
                     candidate_score_half_points: depth.candidate_score.0,
                     reference_score_half_points: depth.reference_score.0,
                     accepted: depth.accepted,
+                    statistics: GameStatisticsData::from(GameStatistics::from_observations(
+                        depth.openings.iter().flat_map(|opening| opening.games),
+                    )),
                     openings: depth
                         .openings
                         .iter()
@@ -549,6 +628,7 @@ impl From<&ExperimentReport> for ValidationData {
                             opening_seed: opening.opening_seed,
                             candidate_score_half_points: opening.candidate_score.0,
                             reference_score_half_points: opening.reference_score.0,
+                            games: opening.games.map(GameObservationData::from),
                         })
                         .collect(),
                 })
@@ -664,6 +744,16 @@ mod tests {
             opening_seed: 123,
             candidate_score: Score(3),
             reference_score: Score(1),
+            games: [
+                GameObservation {
+                    outcome: GameOutcome::WhiteWin,
+                    plies: 21,
+                },
+                GameObservation {
+                    outcome: GameOutcome::Draw(DrawReason::ThreefoldRepetition),
+                    plies: 42,
+                },
+            ],
         };
         let validation = ValidationReport {
             config: validation_config,
@@ -692,6 +782,11 @@ mod tests {
         assert_eq!(
             json["validation"]["by_depth"][0]["openings"][0]["opening_seed"],
             123
+        );
+        assert_eq!(json["validation"]["by_depth"][0]["statistics"]["games"], 2);
+        assert_eq!(
+            json["validation"]["by_depth"][0]["openings"][0]["games"][1]["draw_reason"],
+            "threefold_repetition"
         );
 
         fs::remove_file(output).unwrap();
