@@ -373,7 +373,9 @@ Production training may be split into batches of approximately one hour.
 Every invocation must retain the final target of 100 generations because the
 target generation count is part of checkpoint compatibility.
 
-Use `--checkpoint-every 1`. At the end of a time box:
+Use `--training-only --checkpoint-every 1` so that completing generation 100
+freezes the champion without starting sealed validation. At the end of a time
+box:
 
 1. Confirm that the log has completed at least one new generation.
 2. Confirm that the atomic checkpoint records that completed generation.

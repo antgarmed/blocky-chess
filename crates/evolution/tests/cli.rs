@@ -143,3 +143,43 @@ fn successful_training_reports_compact_progress_only_on_stdout() {
 
     fs::remove_file(checkpoint).unwrap();
 }
+
+#[test]
+fn training_only_stops_after_checkpoint_without_validation_or_report() {
+    let directory = std::env::temp_dir();
+    let checkpoint = directory.join(format!(
+        "blocky-cli-{}-training-only-checkpoint.json",
+        std::process::id()
+    ));
+    let report = directory.join(format!(
+        "blocky-cli-{}-training-only-report.json",
+        std::process::id()
+    ));
+    let mut command = binary();
+    minimal_training(&mut command);
+
+    let output = command
+        .args(["--workers", "1", "--training-only"])
+        .arg("--checkpoint")
+        .arg(&checkpoint)
+        .arg("--report")
+        .arg(&report)
+        .output()
+        .unwrap();
+
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Checkpoint saved: generation 1"));
+    assert!(stdout.contains("Training complete: 1 generations; validation skipped"));
+    assert!(!stdout.contains("Validation started:"));
+    assert!(!stdout.contains("Experiment complete:"));
+    assert!(checkpoint.exists());
+    assert!(!report.exists());
+
+    fs::remove_file(checkpoint).unwrap();
+}

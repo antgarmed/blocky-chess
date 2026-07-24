@@ -37,6 +37,7 @@ Evolution:
   --strong-mutation-step P                [default: 0.50]
 
 Training games:
+  --training-only                         Stop after training; skip validation and report
   --workers N                             Parallel game workers [default: logical CPU count]
   --search-depth N                        [default: 4]
   --max-game-plies N                      [default: 200]
@@ -74,6 +75,7 @@ pub enum Command {
 pub struct TrainCommand {
     pub evolution: EvolutionConfig,
     pub validation: ValidationConfig,
+    pub training_only: bool,
     pub workers: NonZeroUsize,
     pub checkpoint: Option<PathBuf>,
     pub checkpoint_every: usize,
@@ -101,6 +103,11 @@ impl TrainCommand {
             let flag = &args[index];
             if flag == "-h" || flag == "--help" {
                 return Ok(Command::Help);
+            }
+            if flag == "--training-only" {
+                values.training_only = true;
+                index += 1;
+                continue;
             }
             let value = args
                 .get(index + 1)
@@ -233,6 +240,7 @@ fn validation_error(error: &ValidationConfigError) -> String {
 
 #[derive(Clone, Debug)]
 struct RawValues {
+    training_only: bool,
     generations: usize,
     population_size: usize,
     swiss_rounds: usize,
@@ -269,6 +277,7 @@ impl Default for RawValues {
         let training = evolution.training();
         let validation = ValidationConfig::default();
         Self {
+            training_only: false,
             generations: evolution.generations(),
             population_size: evolution.population_size(),
             swiss_rounds: evolution.swiss_rounds(),
@@ -409,6 +418,7 @@ impl RawValues {
         Ok(TrainCommand {
             evolution,
             validation,
+            training_only: self.training_only,
             workers,
             checkpoint: self.checkpoint,
             checkpoint_every: self.checkpoint_every,

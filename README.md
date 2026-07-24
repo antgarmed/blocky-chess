@@ -94,6 +94,9 @@ completed generation, checkpoint saves, and the final summary. Each line is
 flushed immediately so redirected logs can be monitored while training.
 Standard error is reserved for errors. Detailed deterministic game telemetry
 remains in the exported JSON report, including outcomes, draw reasons, and ply
-statistics for training and both color-swapped validation games.
+statistics for training and both color-swapped validation games. Use
+`--training-only` for checkpointed training batches that must stop before
+champion validation; it completes training and writes the configured
+checkpoint, but skips validation and report export.
 
 The evaluation can be tuned through UCI spin options. Material values are exposed as `PawnValue`, `KnightValue`, `BishopValue`, `RookValue`, and `QueenValue` (range 0–1000). Mobility and king-safety weights are also configurable through `MobilityWeight`, the mobility weights for each piece type, and `KingSafetyWeight` (range 0–100).

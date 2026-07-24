@@ -25,6 +25,7 @@ if ((Test-Path -LiteralPath $stdoutLog) -or
 
 $trainingArguments = @(
     "train",
+    "--training-only",
     "--generations", "100",
     "--population-size", "32",
     "--swiss-rounds", "5",
@@ -168,6 +169,9 @@ $finalGeneration = Read-CheckpointGeneration
 if ($null -eq $finalGeneration) {
     $finalGeneration = 0
     $reason = "invalid_checkpoint"
+}
+elseif ($finalGeneration -ge 100 -and $reason -eq "process_exited") {
+    $reason = "training_complete"
 }
 $state = if ($reason -in @("time_box_complete", "training_complete")) {
     "completed"

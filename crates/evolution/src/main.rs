@@ -83,6 +83,13 @@ fn run_train(command: TrainCommand) -> ExitCode {
             return ExitCode::FAILURE;
         }
     };
+    if command.training_only {
+        write_stdout_line(&format!(
+            "Training complete: {} generations; validation skipped",
+            evolution.generations().len()
+        ));
+        return ExitCode::SUCCESS;
+    }
     let mut validator = ChampionValidator::production_parallel(
         command.validation,
         command.workers,
