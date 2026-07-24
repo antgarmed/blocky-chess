@@ -57,13 +57,36 @@ cargo build --release
 # Run the engine (it will communicate via standard input/output with a UCI GUI)
 cargo run --release
 
-# Build the future evolution tool
+# Build the evolution tool
 cargo build --release -p blocky-evolution
 ```
 
 The repository is a Cargo workspace. `blocky-chess` provides the reusable engine
-library and the UCI binary; `blocky-evolution` is an independent binary that can
-depend on the engine library and is currently only a compilation boundary for
-future training work.
+library and the UCI binary; `blocky-evolution` is an independent binary that
+trains evaluation parameters through deterministic self-play.
+
+### Training
+
+Run a complete experiment with the default hyperparameters:
+
+```bash
+cargo run --release -p blocky-evolution -- train
+```
+
+For a quick smoke test, reduce the workload:
+
+```bash
+cargo run --release -p blocky-evolution -- train --generations 1 --population-size 4 --swiss-rounds 1 --search-depth 1 --validation-depths 1 --validation-openings 1
+```
+
+Long runs can save a resumable checkpoint and export their final report:
+
+```bash
+cargo run --release -p blocky-evolution -- train --checkpoint training.json --report result.json
+cargo run --release -p blocky-evolution -- train --checkpoint training.json --resume training.json --report result.json
+```
+
+Use `cargo run --release -p blocky-evolution -- --help` to list all evolutionary,
+self-play, validation, parallelism, and persistence hyperparameters.
 
 The evaluation can be tuned through UCI spin options. Material values are exposed as `PawnValue`, `KnightValue`, `BishopValue`, `RookValue`, and `QueenValue` (range 0–1000). Mobility and king-safety weights are also configurable through `MobilityWeight`, the mobility weights for each piece type, and `KingSafetyWeight` (range 0–100).
