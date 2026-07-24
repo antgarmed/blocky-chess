@@ -1,0 +1,19 @@
+{
+  "run_id": "production-seed-1000",
+  "purpose": "Production evolutionary run 1 of 10",
+  "source_revision_before_run_setup": "c830684c7a75f034cf363187f5c6c19b5ee76b60",
+  "build_profile": "release",
+  "workers": 16,
+  "cpu": "13th Gen Intel(R) Core(TM) i9-13900HX (2.20 GHz)",
+  "ram": "32.0 GB (31.7 GB usable)",
+  "training_seed": 1000,
+  "validation_seed": 6215332838309450821,
+  "target_generations": 100,
+  "batch_duration_seconds": 3600,
+  "checkpoint_every_generations": 1,
+  "notes": [
+    "Training is time-boxed into approximately one-hour batches.",
+    "The validation seed remains sealed because validation is not reached during incomplete training batches.",
+    "No device name, GPU model, or additional hardware-identifying metadata is recorded."
+  ]
+}
