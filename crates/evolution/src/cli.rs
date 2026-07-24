@@ -1,6 +1,6 @@
 //! Thin command-line adapter for configuring and reporting an experiment.
 
-use std::{error::Error, fmt, ops::RangeInclusive};
+use std::{error::Error, fmt, ops::RangeInclusive, path::PathBuf};
 
 use crate::{
     evolution::{EvolutionConfig, EvolutionConfigError},
@@ -46,6 +46,12 @@ Champion validation:
   --validation-max-opening-attempts N     [default: 100]
   --validation-minimum-margin-half-points N [default: 1]
 
+Persistence:
+  --checkpoint PATH                       Save resumable training state
+  --checkpoint-every N                    Save every N generations [default: 1]
+  --resume PATH                           Resume from a compatible checkpoint
+  --report PATH                           Export the complete JSON result
+
   -h, --help                              Print help
 ";
 
@@ -59,6 +65,10 @@ pub enum Command {
 pub struct TrainCommand {
     pub evolution: EvolutionConfig,
     pub validation: ValidationConfig,
+    pub checkpoint: Option<PathBuf>,
+    pub checkpoint_every: usize,
+    pub resume: Option<PathBuf>,
+    pub report: Option<PathBuf>,
 }
 
 impl TrainCommand {
@@ -106,6 +116,7 @@ pub enum CliError {
     TrainingConfig(TrainingConfigError),
     EvolutionConfig(EvolutionConfigError),
     ValidationConfig(ValidationConfigError),
+    ZeroCheckpointFrequency,
 }
 
 impl fmt::Display for CliError {
@@ -143,6 +154,9 @@ impl fmt::Display for CliError {
                     "invalid validation configuration: {}",
                     validation_error(source)
                 )
+            }
+            Self::ZeroCheckpointFrequency => {
+                formatter.write_str("checkpoint frequency must be greater than zero")
             }
         }
     }
@@ -230,6 +244,10 @@ struct RawValues {
     validation_opening_max_plies: usize,
     validation_max_opening_attempts: usize,
     validation_minimum_margin_half_points: u32,
+    checkpoint: Option<PathBuf>,
+    checkpoint_every: usize,
+    resume: Option<PathBuf>,
+    report: Option<PathBuf>,
 }
 
 impl Default for RawValues {
@@ -261,6 +279,10 @@ impl Default for RawValues {
             validation_opening_max_plies: *validation.opening_plies().end(),
             validation_max_opening_attempts: validation.max_opening_attempts(),
             validation_minimum_margin_half_points: validation.minimum_margin_half_points(),
+            checkpoint: None,
+            checkpoint_every: 1,
+            resume: None,
+            report: None,
         }
     }
 }
@@ -319,12 +341,19 @@ impl RawValues {
                     "an unsigned 32-bit integer"
                 )
             }
+            "--checkpoint" => self.checkpoint = Some(PathBuf::from(value)),
+            "--checkpoint-every" => number!(checkpoint_every, "a positive integer"),
+            "--resume" => self.resume = Some(PathBuf::from(value)),
+            "--report" => self.report = Some(PathBuf::from(value)),
             _ => return Err(CliError::UnknownOption(option.to_owned())),
         }
         Ok(())
     }
 
     fn build(self) -> Result<TrainCommand, CliError> {
+        if self.checkpoint_every == 0 {
+            return Err(CliError::ZeroCheckpointFrequency);
+        }
         let training = TrainingConfig::new(
             self.search_depth,
             self.max_game_plies,
@@ -362,6 +391,10 @@ impl RawValues {
         Ok(TrainCommand {
             evolution,
             validation,
+            checkpoint: self.checkpoint,
+            checkpoint_every: self.checkpoint_every,
+            resume: self.resume,
+            report: self.report,
         })
     }
 }
@@ -552,6 +585,10 @@ mod tests {
         let command = train(&["train"]);
         assert_eq!(command.evolution, EvolutionConfig::default());
         assert_eq!(command.validation, ValidationConfig::default());
+        assert_eq!(command.checkpoint, None);
+        assert_eq!(command.checkpoint_every, 1);
+        assert_eq!(command.resume, None);
+        assert_eq!(command.report, None);
     }
 
     #[test]
@@ -604,6 +641,14 @@ mod tests {
             "60",
             "--validation-minimum-margin-half-points",
             "2",
+            "--checkpoint",
+            "run.checkpoint.json",
+            "--checkpoint-every",
+            "5",
+            "--resume",
+            "previous.checkpoint.json",
+            "--report",
+            "result.json",
         ]);
         let evolution = &command.evolution;
         let training = evolution.training();
@@ -629,6 +674,16 @@ mod tests {
         assert_eq!(validation.opening_plies(), &(6..=12));
         assert_eq!(validation.max_opening_attempts(), 60);
         assert_eq!(validation.minimum_margin_half_points(), 2);
+        assert_eq!(
+            command.checkpoint,
+            Some(PathBuf::from("run.checkpoint.json"))
+        );
+        assert_eq!(command.checkpoint_every, 5);
+        assert_eq!(
+            command.resume,
+            Some(PathBuf::from("previous.checkpoint.json"))
+        );
+        assert_eq!(command.report, Some(PathBuf::from("result.json")));
     }
 
     #[test]
@@ -662,6 +717,10 @@ mod tests {
             TrainCommand::from_args(["train", "--generations", "many"]),
             Err(CliError::InvalidValue { .. })
         ));
+        assert_eq!(
+            TrainCommand::from_args(["train", "--checkpoint-every", "0"]),
+            Err(CliError::ZeroCheckpointFrequency)
+        );
     }
 
     #[test]

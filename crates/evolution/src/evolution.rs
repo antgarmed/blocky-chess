@@ -546,6 +546,15 @@ pub struct GenerationResult {
 }
 
 impl GenerationResult {
+    pub fn new(
+        index: usize,
+        ranked: Vec<EvaluatedIndividual>,
+    ) -> Result<Self, EvolutionStateError> {
+        if ranked.is_empty() {
+            return Err(EvolutionStateError::EmptyRanking);
+        }
+        Ok(Self { index, ranked })
+    }
     pub const fn index(&self) -> usize {
         self.index
     }
@@ -564,6 +573,18 @@ pub struct EvolutionResult {
 }
 
 impl EvolutionResult {
+    pub fn new(
+        generations: Vec<GenerationResult>,
+        best_ever: EvaluatedIndividual,
+    ) -> Result<Self, EvolutionStateError> {
+        if generations.is_empty() {
+            return Err(EvolutionStateError::NoCompletedGenerations);
+        }
+        Ok(Self {
+            generations,
+            best_ever,
+        })
+    }
     pub fn generations(&self) -> &[GenerationResult] {
         &self.generations
     }
@@ -571,6 +592,98 @@ impl EvolutionResult {
         &self.best_ever
     }
 }
+
+/// Everything required to continue immediately after a completed generation.
+#[derive(Clone, Debug, PartialEq)]
+pub struct EvolutionState {
+    next_generation: usize,
+    population: Vec<Individual>,
+    generations: Vec<GenerationResult>,
+    best_ever: EvaluatedIndividual,
+    next_id: u64,
+    rng_state: u64,
+}
+
+impl EvolutionState {
+    #[allow(clippy::too_many_arguments)]
+    pub fn new(
+        next_generation: usize,
+        population: Vec<Individual>,
+        generations: Vec<GenerationResult>,
+        best_ever: EvaluatedIndividual,
+        next_id: u64,
+        rng_state: u64,
+    ) -> Result<Self, EvolutionStateError> {
+        if next_generation == 0 || generations.len() != next_generation {
+            return Err(EvolutionStateError::GenerationMismatch);
+        }
+        if generations
+            .iter()
+            .enumerate()
+            .any(|(index, generation)| generation.index() != index)
+        {
+            return Err(EvolutionStateError::NonContiguousHistory);
+        }
+        let maximum_id = population
+            .iter()
+            .map(|individual| individual.id().0)
+            .chain(generations.iter().flat_map(|generation| {
+                generation
+                    .ranked()
+                    .iter()
+                    .map(|individual| individual.individual().id().0)
+            }))
+            .max()
+            .unwrap_or(0);
+        if next_id <= maximum_id {
+            return Err(EvolutionStateError::InvalidNextId);
+        }
+        Ok(Self {
+            next_generation,
+            population,
+            generations,
+            best_ever,
+            next_id,
+            rng_state,
+        })
+    }
+
+    pub const fn next_generation(&self) -> usize {
+        self.next_generation
+    }
+    pub fn population(&self) -> &[Individual] {
+        &self.population
+    }
+    pub fn generations(&self) -> &[GenerationResult] {
+        &self.generations
+    }
+    pub const fn best_ever(&self) -> &EvaluatedIndividual {
+        &self.best_ever
+    }
+    pub const fn next_id(&self) -> u64 {
+        self.next_id
+    }
+    pub const fn rng_state(&self) -> u64 {
+        self.rng_state
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum EvolutionStateError {
+    EmptyRanking,
+    NoCompletedGenerations,
+    GenerationMismatch,
+    NonContiguousHistory,
+    InvalidNextId,
+}
+
+impl fmt::Display for EvolutionStateError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{self:?}")
+    }
+}
+
+impl Error for EvolutionStateError {}
 
 pub struct EvolutionEngine<E> {
     config: EvolutionConfig,
@@ -679,8 +792,66 @@ impl<E: PopulationEvaluator> EvolutionEngine<E> {
 
     pub fn run_from(
         &mut self,
-        mut population: Vec<Individual>,
+        population: Vec<Individual>,
     ) -> Result<EvolutionResult, EvolutionError<E::Error>> {
+        self.run_internal(population, 0, Vec::new(), None, false, |_| Ok(()))
+    }
+
+    /// Resumes a persisted run and exposes a consistent state after each newly
+    /// completed generation. The callback is never invoked for generations
+    /// already present in `state`.
+    pub fn run_resuming<F>(
+        &mut self,
+        state: EvolutionState,
+        checkpoint: F,
+    ) -> Result<EvolutionResult, EvolutionError<E::Error>>
+    where
+        F: FnMut(&EvolutionState) -> Result<(), Box<dyn Error + Send + Sync>>,
+    {
+        if state.next_generation > self.config.generations() {
+            return Err(EvolutionError::CompletedGenerationsExceedTarget {
+                completed: state.next_generation,
+                target: self.config.generations(),
+            });
+        }
+        self.next_id = state.next_id;
+        if !self.rng.restore_persistent_state(state.rng_state) {
+            return Err(EvolutionError::RandomSourceNotPersistent);
+        }
+        self.run_internal(
+            state.population,
+            state.next_generation,
+            state.generations,
+            Some(state.best_ever),
+            true,
+            checkpoint,
+        )
+    }
+
+    /// Starts a new run and publishes a resumable state after every generation.
+    pub fn run_with_checkpoints<F>(
+        &mut self,
+        checkpoint: F,
+    ) -> Result<EvolutionResult, EvolutionError<E::Error>>
+    where
+        F: FnMut(&EvolutionState) -> Result<(), Box<dyn Error + Send + Sync>>,
+    {
+        let population = self.initialize_population();
+        self.run_internal(population, 0, Vec::new(), None, true, checkpoint)
+    }
+
+    fn run_internal<F>(
+        &mut self,
+        mut population: Vec<Individual>,
+        start_generation: usize,
+        mut generations: Vec<GenerationResult>,
+        mut best_ever: Option<EvaluatedIndividual>,
+        publish_checkpoints: bool,
+        mut checkpoint: F,
+    ) -> Result<EvolutionResult, EvolutionError<E::Error>>
+    where
+        F: FnMut(&EvolutionState) -> Result<(), Box<dyn Error + Send + Sync>>,
+    {
         validate_population(&population, self.config.population_size())?;
         if let Some(maximum_id) = population.iter().map(|individual| individual.id().0).max() {
             self.next_id = self.next_id.max(maximum_id + 1);
@@ -690,9 +861,8 @@ impl<E: PopulationEvaluator> EvolutionEngine<E> {
             generations: self.config.generations(),
             population_size: self.config.population_size(),
         });
-        let mut generations = Vec::with_capacity(self.config.generations());
-        let mut best_ever = None;
-        for generation in 0..self.config.generations() {
+        generations.reserve(self.config.generations().saturating_sub(generations.len()));
+        for generation in start_generation..self.config.generations() {
             self.observer.on_event(ProgressEvent::GenerationStarted {
                 generation,
                 total_generations: self.config.generations(),
@@ -726,8 +896,24 @@ impl<E: PopulationEvaluator> EvolutionEngine<E> {
             if generation + 1 < self.config.generations() {
                 population = self.next_generation(&ranked)?;
             }
+            if publish_checkpoints {
+                let rng_state = self
+                    .rng
+                    .persistent_state()
+                    .ok_or(EvolutionError::RandomSourceNotPersistent)?;
+                let state = EvolutionState::new(
+                    generation + 1,
+                    population.clone(),
+                    generations.clone(),
+                    best_ever.clone().expect("this generation produced a best"),
+                    self.next_id,
+                    rng_state,
+                )
+                .expect("engine produces a valid resumable state");
+                checkpoint(&state).map_err(EvolutionError::Checkpoint)?;
+            }
         }
-        let best_ever = best_ever.expect("at least one generation is configured");
+        let best_ever = best_ever.expect("at least one generation is configured or resumed");
         self.observer.on_event(ProgressEvent::EvolutionCompleted {
             generations: self.config.generations(),
             best: best_ever.individual().id(),
@@ -857,6 +1043,9 @@ pub enum EvolutionError<E> {
     DuplicateIndividualId,
     InvalidStandings,
     Reproduction(ReproductionError),
+    CompletedGenerationsExceedTarget { completed: usize, target: usize },
+    RandomSourceNotPersistent,
+    Checkpoint(Box<dyn Error + Send + Sync>),
 }
 
 impl<E: fmt::Display> fmt::Display for EvolutionError<E> {
@@ -874,6 +1063,14 @@ impl<E: fmt::Display> fmt::Display for EvolutionError<E> {
                 formatter.write_str("evaluator returned standings for a different population")
             }
             Self::Reproduction(source) => write!(formatter, "reproduction failed: {source}"),
+            Self::CompletedGenerationsExceedTarget { completed, target } => write!(
+                formatter,
+                "checkpoint contains {completed} completed generations, target is {target}"
+            ),
+            Self::RandomSourceNotPersistent => {
+                formatter.write_str("random source does not support deterministic persistence")
+            }
+            Self::Checkpoint(source) => write!(formatter, "checkpoint failed: {source}"),
         }
     }
 }
@@ -1381,5 +1578,51 @@ mod tests {
             assert!(child.genes()[index] >= second.genes()[index]);
             assert!(child.genes()[index] <= first.genes()[index]);
         }
+    }
+
+    #[test]
+    fn resumed_run_is_bit_for_bit_equal_and_does_not_repeat_completed_generations() {
+        let configuration = config(4, 1);
+        let baseline_seen = Rc::new(RefCell::new(vec![]));
+        let mut baseline = EvolutionEngine::with_defaults(
+            configuration.clone(),
+            ByIdEvaluator {
+                seen: baseline_seen,
+            },
+        );
+        let expected = baseline.run().unwrap();
+
+        let interrupted_seen = Rc::new(RefCell::new(vec![]));
+        let mut interrupted = EvolutionEngine::with_defaults(
+            configuration.clone(),
+            ByIdEvaluator {
+                seen: interrupted_seen.clone(),
+            },
+        );
+        let captured = Rc::new(RefCell::new(None));
+        let capture = captured.clone();
+        let result = interrupted.run_with_checkpoints(|state| {
+            if state.next_generation() == 2 {
+                *capture.borrow_mut() = Some(state.clone());
+                return Err(Box::new(std::io::Error::other("simulated interruption")));
+            }
+            Ok(())
+        });
+        assert!(matches!(result, Err(EvolutionError::Checkpoint(_))));
+        assert_eq!(interrupted_seen.borrow().len(), 2);
+
+        let resumed_seen = Rc::new(RefCell::new(vec![]));
+        let mut resumed = EvolutionEngine::with_defaults(
+            configuration,
+            ByIdEvaluator {
+                seen: resumed_seen.clone(),
+            },
+        );
+        let actual = resumed
+            .run_resuming(captured.borrow_mut().take().unwrap(), |_| Ok(()))
+            .unwrap();
+
+        assert_eq!(actual, expected);
+        assert_eq!(resumed_seen.borrow().len(), 2);
     }
 }

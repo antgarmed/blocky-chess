@@ -10,6 +10,7 @@ pub mod experiment;
 pub mod genome;
 pub mod openings;
 pub mod pairing;
+pub mod persistence;
 pub mod progress;
 pub mod rng;
 pub mod self_play;

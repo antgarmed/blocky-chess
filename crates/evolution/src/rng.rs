@@ -5,6 +5,16 @@
 pub trait RandomSource {
     fn next_u64(&mut self) -> u64;
 
+    /// Returns the exact stream state when this source supports persistence.
+    fn persistent_state(&self) -> Option<u64> {
+        None
+    }
+
+    /// Restores an exact stream state. Custom sources may opt out.
+    fn restore_persistent_state(&mut self, _state: u64) -> bool {
+        false
+    }
+
     fn unit_f64(&mut self) -> f64 {
         // Use the upper 53 bits and the midpoint of the represented interval.
         // The result is strictly between zero and one.
@@ -38,6 +48,15 @@ impl RandomSource for StableRng {
     fn next_u64(&mut self) -> u64 {
         self.0 = self.0.wrapping_add(0x9e37_79b9_7f4a_7c15);
         mix(self.0)
+    }
+
+    fn persistent_state(&self) -> Option<u64> {
+        Some(self.0)
+    }
+
+    fn restore_persistent_state(&mut self, state: u64) -> bool {
+        self.0 = state;
+        true
     }
 }
 

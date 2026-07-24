@@ -52,6 +52,12 @@ pub struct ExperimentReport {
 }
 
 impl ExperimentReport {
+    pub fn new(evolution: EvolutionResult, validation: ValidationReport) -> Self {
+        Self {
+            evolution,
+            validation,
+        }
+    }
     pub const fn evolution(&self) -> &EvolutionResult {
         &self.evolution
     }
