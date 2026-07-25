@@ -11,6 +11,7 @@ use std::{
 };
 
 use crate::{
+    benchmark::BenchmarkConfig,
     evolution::{EvolutionConfig, EvolutionConfigError},
     experiment::ExperimentReport,
     progress::{ProgressEvent, ProgressObserver},
@@ -24,6 +25,7 @@ Train Blocky Chess evaluation parameters through deterministic self-play
 Usage:
   blocky-evolution train [OPTIONS]
   blocky-evolution validate --checkpoint PATH --report PATH [OPTIONS]
+  blocky-evolution benchmark --checkpoint PATH --report PATH [OPTIONS]
   blocky-evolution --help
 
 Evolution:
@@ -59,6 +61,17 @@ Champion validation:
   --validation-max-opening-attempts N     [default: 100]
   --validation-minimum-margin-half-points N [default: 1]
 
+Exploratory checkpoint benchmark:
+  --benchmark-depth N                     [default: 4]
+  --benchmark-openings N                  [default: 20]
+  --benchmark-max-game-plies N            [default: 200]
+  --benchmark-seed N                      [default: 2026072502]
+  --opponent-seed N                       [default: 2026072503]
+  --random-genomes N                      [default: 8]
+  --benchmark-opening-min-plies N         [default: 4]
+  --benchmark-opening-max-plies N         [default: 10]
+  --benchmark-max-opening-attempts N      [default: 100]
+
 Persistence:
   --checkpoint PATH                       Save resumable training state
   --checkpoint-every N                    Save every N generations [default: 1]
@@ -73,6 +86,16 @@ pub enum Command {
     Help,
     Train(Box<TrainCommand>),
     Validate(Box<ValidateCommand>),
+    Benchmark(Box<BenchmarkCommand>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BenchmarkCommand {
+    pub checkpoint: PathBuf,
+    pub report: PathBuf,
+    pub selector: CandidateSelector,
+    pub config: BenchmarkConfig,
+    pub workers: NonZeroUsize,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -113,6 +136,11 @@ impl TrainCommand {
                     .map(Box::new)
                     .map(Command::Validate)
             }
+            Some("benchmark") => {
+                return BenchmarkCommand::parse(&args)
+                    .map(Box::new)
+                    .map(Command::Benchmark)
+            }
             Some("train") => {}
             Some(command) => return Err(CliError::UnknownCommand(command.to_owned())),
             None => return Err(CliError::MissingCommand),
@@ -137,6 +165,106 @@ impl TrainCommand {
             index += 2;
         }
         values.build().map(Box::new).map(Command::Train)
+    }
+}
+
+impl BenchmarkCommand {
+    fn parse(args: &[String]) -> Result<Self, CliError> {
+        let mut checkpoint = None;
+        let mut report = None;
+        let mut selector = CandidateSelector::BestEver;
+        let mut generation_set = false;
+        let mut candidate_set = false;
+        let mut workers = std::thread::available_parallelism()
+            .map(NonZeroUsize::get)
+            .unwrap_or(1);
+        let mut config = BenchmarkConfig {
+            search_depth: 4,
+            opening_count: 20,
+            max_game_plies: 200,
+            benchmark_seed: 2_026_072_502,
+            opponent_seed: 2_026_072_503,
+            random_genome_count: 8,
+            opening_plies: 4..=10,
+            max_opening_attempts: 100,
+        };
+        let mut index = 1;
+        while index < args.len() {
+            let flag = &args[index];
+            let value = args
+                .get(index + 1)
+                .ok_or_else(|| CliError::MissingValue(flag.clone()))?;
+            match flag.as_str() {
+                "--checkpoint" => checkpoint = Some(value.into()),
+                "--report" => report = Some(value.into()),
+                "--candidate" if value == "best-ever" => {
+                    if generation_set {
+                        return Err(CliError::ConflictingCandidateSelectors);
+                    }
+                    candidate_set = true;
+                }
+                "--generation" => {
+                    if candidate_set {
+                        return Err(CliError::ConflictingCandidateSelectors);
+                    }
+                    let value = parse(flag, value, "a positive human generation number")?;
+                    if value == 0 {
+                        return Err(CliError::ZeroGenerationSelector);
+                    }
+                    generation_set = true;
+                    selector = CandidateSelector::Generation(value);
+                }
+                "--workers" => workers = parse(flag, value, "a positive integer")?,
+                "--benchmark-depth" => {
+                    config.search_depth = parse(flag, value, "a positive integer")?
+                }
+                "--benchmark-openings" => {
+                    config.opening_count = parse(flag, value, "a positive integer")?
+                }
+                "--benchmark-max-game-plies" => {
+                    config.max_game_plies = parse(flag, value, "a positive integer")?
+                }
+                "--benchmark-seed" => {
+                    config.benchmark_seed = parse(flag, value, "an unsigned 64-bit integer")?
+                }
+                "--opponent-seed" => {
+                    config.opponent_seed = parse(flag, value, "an unsigned 64-bit integer")?
+                }
+                "--random-genomes" => {
+                    config.random_genome_count = parse(flag, value, "a positive integer")?
+                }
+                "--benchmark-opening-min-plies" => {
+                    let min = parse(flag, value, "a non-negative integer")?;
+                    config.opening_plies = min..=*config.opening_plies.end();
+                }
+                "--benchmark-opening-max-plies" => {
+                    let max = parse(flag, value, "a non-negative integer")?;
+                    config.opening_plies = *config.opening_plies.start()..=max;
+                }
+                "--benchmark-max-opening-attempts" => {
+                    config.max_opening_attempts = parse(flag, value, "a positive integer")?
+                }
+                "--candidate" => {
+                    return Err(CliError::InvalidValue {
+                        option: flag.clone(),
+                        value: value.clone(),
+                        expected: "`best-ever`",
+                    })
+                }
+                _ => return Err(CliError::UnknownOption(flag.clone())),
+            }
+            index += 2;
+        }
+        config
+            .validate()
+            .map_err(|error| CliError::BenchmarkConfig(error.to_string()))?;
+        Ok(Self {
+            checkpoint: checkpoint.ok_or(CliError::MissingRequiredOption("--checkpoint"))?,
+            report: report.ok_or(CliError::MissingRequiredOption("--report"))?,
+            selector,
+            config,
+            workers: NonZeroUsize::new(workers).ok_or(CliError::ZeroWorkers)?,
+        })
     }
 }
 
@@ -225,12 +353,14 @@ pub enum CliError {
     MissingRequiredOption(&'static str),
     ZeroGenerationSelector,
     ConflictingCandidateSelectors,
+    BenchmarkConfig(String),
 }
 
 impl fmt::Display for CliError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::MissingCommand => formatter.write_str("missing command; use `train` or `--help`"),
+            Self::MissingCommand => formatter
+                .write_str("missing command; use `train`, `validate`, `benchmark`, or `--help`"),
             Self::UnknownCommand(command) => {
                 write!(formatter, "unknown command `{command}`; use `--help`")
             }
@@ -275,6 +405,7 @@ impl fmt::Display for CliError {
             }
             Self::ConflictingCandidateSelectors => formatter
                 .write_str("`--candidate best-ever` and `--generation` are mutually exclusive"),
+            Self::BenchmarkConfig(message) => formatter.write_str(message),
         }
     }
 }
@@ -784,7 +915,9 @@ mod tests {
     fn train(args: &[&str]) -> TrainCommand {
         match TrainCommand::from_args(args.iter().copied()).unwrap() {
             Command::Train(command) => *command,
-            Command::Help | Command::Validate(_) => panic!("expected train command"),
+            Command::Help | Command::Validate(_) | Command::Benchmark(_) => {
+                panic!("expected train command")
+            }
         }
     }
 
@@ -1085,5 +1218,57 @@ mod tests {
                 Err(CliError::ConflictingCandidateSelectors)
             );
         }
+    }
+
+    #[test]
+    fn parses_checkpoint_benchmark_with_human_generation_and_fixed_controls() {
+        let command = TrainCommand::from_args([
+            "benchmark",
+            "--checkpoint",
+            "checkpoint.json",
+            "--report",
+            "benchmark.json",
+            "--generation",
+            "25",
+            "--workers",
+            "3",
+            "--benchmark-depth",
+            "2",
+            "--benchmark-openings",
+            "4",
+            "--random-genomes",
+            "6",
+            "--benchmark-seed",
+            "70",
+            "--opponent-seed",
+            "71",
+        ])
+        .unwrap();
+        let Command::Benchmark(command) = command else {
+            panic!("expected benchmark command");
+        };
+        assert_eq!(command.selector, CandidateSelector::Generation(25));
+        assert_eq!(command.workers.get(), 3);
+        assert_eq!(command.config.search_depth, 2);
+        assert_eq!(command.config.opening_count, 4);
+        assert_eq!(command.config.random_genome_count, 6);
+        assert_eq!(command.config.benchmark_seed, 70);
+        assert_eq!(command.config.opponent_seed, 71);
+    }
+
+    #[test]
+    fn benchmark_rejects_invalid_configuration_during_cli_parsing() {
+        assert!(matches!(
+            TrainCommand::from_args([
+                "benchmark",
+                "--checkpoint",
+                "missing.json",
+                "--report",
+                "report.json",
+                "--benchmark-depth",
+                "0",
+            ]),
+            Err(CliError::BenchmarkConfig(message)) if message.contains("depth")
+        ));
     }
 }

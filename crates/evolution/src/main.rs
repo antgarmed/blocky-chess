@@ -2,15 +2,15 @@ use std::{env, process::ExitCode};
 
 use blocky_evolution::{
     cli::{
-        render_summary, write_stdout_line, Command, ConsoleProgressObserver, TrainCommand,
-        ValidateCommand, HELP,
+        render_summary, write_stdout_line, BenchmarkCommand, Command, ConsoleProgressObserver,
+        TrainCommand, ValidateCommand, HELP,
     },
     encounter::ProductionGameRunner,
     evolution::{EvolutionEngine, SelfPlayPopulationEvaluator},
     experiment::ExperimentReport,
     persistence::{
-        read_checkpoint, read_checkpoint_unchecked_config, write_checkpoint,
-        write_experiment_report, write_validation_report,
+        read_checkpoint, read_checkpoint_unchecked_config, write_benchmark_report,
+        write_checkpoint, write_experiment_report, write_validation_report,
     },
     validation::{CandidateSelector, ChampionValidator},
 };
@@ -30,7 +30,85 @@ fn main() -> ExitCode {
         }
         Command::Train(command) => run_train(*command),
         Command::Validate(command) => run_validate(*command),
+        Command::Benchmark(command) => run_benchmark(*command),
     }
+}
+
+fn run_benchmark(command: BenchmarkCommand) -> ExitCode {
+    let (evolution_config, state) = match read_checkpoint_unchecked_config(&command.checkpoint) {
+        Ok(data) => data,
+        Err(error) => {
+            eprintln!("error: could not read checkpoint: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let training_seed = evolution_config.training().master_seed();
+    let final_validation_seed =
+        blocky_evolution::validation::ValidationConfig::default().master_seed();
+    let seeds = [
+        training_seed,
+        final_validation_seed,
+        command.config.benchmark_seed,
+        command.config.opponent_seed,
+    ];
+    for left in 0..seeds.len() {
+        for right in left + 1..seeds.len() {
+            if seeds[left] == seeds[right] {
+                eprintln!("error: training, final validation, benchmark, and opponent seeds must be distinct");
+                return ExitCode::from(2);
+            }
+        }
+    }
+    let candidate = match &command.selector {
+        CandidateSelector::BestEver => state.best_ever(),
+        CandidateSelector::Generation(human) => match state.generations().get(human - 1) {
+            Some(generation) => generation.best(),
+            None => {
+                eprintln!("error: generation {human} is unavailable; checkpoint contains {} completed generations", state.generations().len());
+                return ExitCode::from(2);
+            }
+        },
+    };
+    write_stdout_line(&format!(
+        "Benchmark started: depth {}, openings {}, random genomes {}",
+        command.config.search_depth,
+        command.config.opening_count,
+        command.config.random_genome_count
+    ));
+    let mut observer = |control: &blocky_evolution::benchmark::ControlResult| {
+        let label = match control.opponent_index {
+            Some(index) => format!("random-genome-{index}"),
+            None => "random-legal".to_owned(),
+        };
+        write_stdout_line(&format!(
+            "Benchmark control complete: {label}, candidate {}, opponent {}",
+            control.candidate_score_half_points, control.opponent_score_half_points
+        ));
+    };
+    let report = match blocky_evolution::benchmark::run_benchmark_with_observer(
+        candidate.individual().genome(),
+        &command.config,
+        command.workers,
+        &mut observer,
+    ) {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("error: benchmark failed: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Err(error) = write_benchmark_report(
+        &command.report,
+        training_seed,
+        &command.selector,
+        candidate,
+        &report,
+    ) {
+        eprintln!("error: could not export benchmark report: {error}");
+        return ExitCode::FAILURE;
+    }
+    write_stdout_line("Benchmark complete");
+    ExitCode::SUCCESS
 }
 
 fn run_validate(command: ValidateCommand) -> ExitCode {

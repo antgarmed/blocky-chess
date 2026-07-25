@@ -114,4 +114,19 @@ candidate against the literal `EvaluationConfig::default()` on held-out
 openings with colors swapped. Its validation seed must differ from the
 training seed embedded in the checkpoint.
 
+Run exploratory controls against a checkpoint without retraining:
+
+```bash
+cargo run --release -p blocky-evolution -- benchmark \
+  --checkpoint training.json --report benchmark.json \
+  --benchmark-depth 4 --benchmark-openings 20 --random-genomes 8
+```
+
+The candidate is `best-ever` unless `--generation N` is supplied. The
+`random-legal` control is a basic competence floor. The fixed, reproducible
+`random-genome` ensemble is the main control for measuring progress beyond the
+knowledge-free initial distribution. Both controls use color-swapped held-out
+openings and are exploratory; they do not replace sealed validation against
+`EvaluationConfig::default()`.
+
 The evaluation can be tuned through UCI spin options. Material values are exposed as `PawnValue`, `KnightValue`, `BishopValue`, `RookValue`, and `QueenValue` (range 0–1000). Mobility and king-safety weights are also configurable through `MobilityWeight`, the mobility weights for each piece type, and `KingSafetyWeight` (range 0–100).

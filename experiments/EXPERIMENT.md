@@ -316,6 +316,23 @@ report.
 
 ## 13. Random-Search Control Experiment
 
+### 13.1 Exploratory checkpoint controls
+
+Before changing the training objective, checkpoint snapshots may be evaluated
+with the standalone `benchmark` command against two development controls:
+
+- `RandomLegal` samples uniformly from legal moves and is only a basic
+  competence floor.
+- A fixed ensemble of eight `RandomGenome` opponents searches at the same
+  depth as the candidate and is the primary control for detecting improvement
+  beyond the knowledge-free initial distribution.
+
+The controls use shared held-out openings with colors swapped. Benchmark and
+opponent seeds must be distinct from training and sealed validation seeds.
+These results are exploratory and must not select the production champion,
+change the frozen success criteria, or replace validation against the default
+evaluation.
+
 A later experiment should determine whether the evolutionary operators add
 value beyond evaluating many random genomes.
 

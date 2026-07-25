@@ -3,6 +3,7 @@
 //! This crate deliberately keeps the evolutionary loop separate from the
 //! reusable representation of an evaluation genome.
 
+pub mod benchmark;
 pub mod cli;
 pub mod encounter;
 pub mod evolution;

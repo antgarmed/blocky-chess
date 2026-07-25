@@ -262,3 +262,87 @@ fn standalone_validation_uses_checkpoint_without_retraining() {
     fs::remove_file(checkpoint).unwrap();
     fs::remove_file(report).unwrap();
 }
+
+#[test]
+fn checkpoint_benchmark_writes_versioned_report_without_retraining() {
+    let directory = std::env::temp_dir();
+    let checkpoint = directory.join(format!(
+        "blocky-cli-{}-benchmark-checkpoint.json",
+        std::process::id()
+    ));
+    let report = directory.join(format!("blocky-cli-{}-benchmark.json", std::process::id()));
+    let mut train = binary();
+    minimal_training(&mut train);
+    let output = train
+        .args(["--workers", "1", "--training-only"])
+        .arg("--checkpoint")
+        .arg(&checkpoint)
+        .output()
+        .unwrap();
+    assert!(output.status.success());
+
+    let output = binary()
+        .args([
+            "benchmark",
+            "--workers",
+            "2",
+            "--benchmark-depth",
+            "1",
+            "--benchmark-openings",
+            "1",
+            "--benchmark-max-game-plies",
+            "1",
+            "--benchmark-opening-min-plies",
+            "0",
+            "--benchmark-opening-max-plies",
+            "0",
+            "--random-genomes",
+            "1",
+            "--benchmark-seed",
+            "97",
+            "--opponent-seed",
+            "98",
+        ])
+        .arg("--checkpoint")
+        .arg(&checkpoint)
+        .arg("--report")
+        .arg(&report)
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert!(output.stderr.is_empty());
+    let stdout = String::from_utf8(output.stdout).unwrap();
+    assert!(stdout.contains("Benchmark complete"));
+    assert!(!stdout.contains("Generation "));
+    let json: serde_json::Value = serde_json::from_slice(&fs::read(&report).unwrap()).unwrap();
+    assert_eq!(json["format"], "blocky-evolution-benchmark");
+    assert_eq!(json["version"], 1);
+    assert_eq!(json["selector"]["kind"], "best-ever");
+    assert_eq!(
+        json["benchmark"]["random_genomes"]
+            .as_array()
+            .unwrap()
+            .len(),
+        1
+    );
+    assert_eq!(json["benchmark"]["controls"].as_array().unwrap().len(), 2);
+    assert_eq!(json["benchmark"]["opening_count"], 1);
+    assert_eq!(json["benchmark"]["max_game_plies"], 1);
+    assert_eq!(json["benchmark"]["opening_min_plies"], 0);
+    assert_eq!(json["benchmark"]["opening_max_plies"], 0);
+    assert_eq!(json["benchmark"]["max_opening_attempts"], 100);
+    assert_eq!(json["benchmark"]["random_genome_count"], 1);
+    assert_eq!(
+        json["benchmark"]["random_genome_ensemble"]["opponent_count"],
+        1
+    );
+    assert!(json["benchmark"]["random_genome_ensemble"]["statistics"]["mean_plies"].is_number());
+    assert!(json["benchmark"]["controls"][0]["statistics"]["p95_plies"].is_number());
+
+    fs::remove_file(checkpoint).unwrap();
+    fs::remove_file(report).unwrap();
+}

@@ -16,12 +16,34 @@ use blocky_chess::{
 };
 use shakmaty::{zobrist::Zobrist128, Chess, Color, EnPassantMode, Move, Position};
 
+use crate::rng::{RandomSource, StableRng};
+
 /// Selects one move without taking responsibility for game rules.
 ///
 /// Keeping this boundary small makes the arbiter independent from the search
 /// implementation and allows cheap, deterministic scripted tests.
 pub trait MoveSelector {
     fn select_move(&mut self, position: &Chess) -> Result<Option<Move>, MoveSelectionError>;
+}
+
+/// Deterministic control player that samples uniformly from all legal moves.
+pub struct RandomLegalMoveSelector {
+    rng: StableRng,
+}
+
+impl RandomLegalMoveSelector {
+    pub fn new(seed: u64) -> Self {
+        Self {
+            rng: StableRng::new(seed),
+        }
+    }
+}
+
+impl MoveSelector for RandomLegalMoveSelector {
+    fn select_move(&mut self, position: &Chess) -> Result<Option<Move>, MoveSelectionError> {
+        let moves = position.legal_moves();
+        Ok((!moves.is_empty()).then(|| moves[self.rng.index(moves.len())]))
+    }
 }
 
 /// A failure inside a move selector.

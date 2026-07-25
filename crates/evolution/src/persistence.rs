@@ -209,7 +209,10 @@ fn verify_header(format: &str, version: u32) -> Result<(), PersistenceError> {
     Ok(())
 }
 
-fn write_json_atomically<T: Serialize>(path: &Path, value: &T) -> Result<(), PersistenceError> {
+pub(crate) fn write_json_atomically<T: Serialize>(
+    path: &Path,
+    value: &T,
+) -> Result<(), PersistenceError> {
     let parent = path
         .parent()
         .filter(|parent| !parent.as_os_str().is_empty())
@@ -249,6 +252,43 @@ fn write_json_atomically<T: Serialize>(path: &Path, value: &T) -> Result<(), Per
         fs::remove_file(&backup).map_err(|source| io_error("remove backup for", path, source))?;
     }
     Ok(())
+}
+
+#[derive(Serialize)]
+struct StandaloneBenchmarkDocument<'a> {
+    format: &'static str,
+    version: u32,
+    training_seed: u64,
+    selector: StandaloneSelectorData,
+    candidate: EvaluatedIndividualData,
+    benchmark: &'a crate::benchmark::BenchmarkReport,
+}
+
+pub fn write_benchmark_report(
+    path: &Path,
+    training_seed: u64,
+    selector: &CandidateSelector,
+    candidate: &EvaluatedIndividual,
+    report: &crate::benchmark::BenchmarkReport,
+) -> Result<(), PersistenceError> {
+    let selector = match selector {
+        CandidateSelector::BestEver => StandaloneSelectorData::BestEver,
+        CandidateSelector::Generation(human_generation) => StandaloneSelectorData::Generation {
+            human_generation: *human_generation,
+            stored_generation_index: human_generation - 1,
+        },
+    };
+    write_json_atomically(
+        path,
+        &StandaloneBenchmarkDocument {
+            format: "blocky-evolution-benchmark",
+            version: 1,
+            training_seed,
+            selector,
+            candidate: EvaluatedIndividualData::from(candidate),
+            benchmark: report,
+        },
+    )
 }
 
 fn io_error(operation: &'static str, path: &Path, source: io::Error) -> PersistenceError {
