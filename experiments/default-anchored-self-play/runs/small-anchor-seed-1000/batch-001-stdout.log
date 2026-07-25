@@ -1,0 +1,145 @@
+Evolution started: 100 generations, population 32
+Generation 1: Default anchor completed (1 pairs/individual, 64 games, candidates 15/128)
+Generation 1/100 completed: best individual 10, selection 1310/2000 units; elapsed 88.299s, 2.537 games/s
+Checkpoint saved: generation 1
+Generation 2: Default anchor completed (1 pairs/individual, 64 games, candidates 13/128)
+Generation 2/100 completed: best individual 52, selection 1310/2000 units; elapsed 74.768s, 2.996 games/s
+Checkpoint saved: generation 2
+Generation 3: Default anchor completed (1 pairs/individual, 64 games, candidates 7/128)
+Generation 3/100 completed: best individual 72, selection 1350/2000 units; elapsed 77.401s, 2.894 games/s
+Checkpoint saved: generation 3
+Generation 4: Default anchor completed (1 pairs/individual, 64 games, candidates 18/128)
+Generation 4/100 completed: best individual 96, selection 1350/2000 units; elapsed 85.696s, 2.614 games/s
+Checkpoint saved: generation 4
+Generation 5: Default anchor completed (1 pairs/individual, 64 games, candidates 14/128)
+Generation 5/100 completed: best individual 131, selection 1400/2000 units; elapsed 89.643s, 2.499 games/s
+Checkpoint saved: generation 5
+Generation 6: Default anchor completed (1 pairs/individual, 64 games, candidates 15/128)
+Generation 6/100 completed: best individual 170, selection 1400/2000 units; elapsed 79.137s, 2.831 games/s
+Checkpoint saved: generation 6
+Generation 7: Default anchor completed (1 pairs/individual, 64 games, candidates 17/128)
+Generation 7/100 completed: best individual 185, selection 1350/2000 units; elapsed 87.034s, 2.574 games/s
+Checkpoint saved: generation 7
+Generation 8: Default anchor completed (1 pairs/individual, 64 games, candidates 21/128)
+Generation 8/100 completed: best individual 240, selection 1310/2000 units; elapsed 93.568s, 2.394 games/s
+Checkpoint saved: generation 8
+Generation 9: Default anchor completed (1 pairs/individual, 64 games, candidates 6/128)
+Generation 9/100 completed: best individual 269, selection 1260/2000 units; elapsed 65.424s, 3.424 games/s
+Checkpoint saved: generation 9
+Generation 10: Default anchor completed (1 pairs/individual, 64 games, candidates 18/128)
+Generation 10/100 completed: best individual 277, selection 1310/2000 units; elapsed 93.369s, 2.399 games/s
+Checkpoint saved: generation 10
+Generation 11: Default anchor completed (1 pairs/individual, 64 games, candidates 19/128)
+Generation 11/100 completed: best individual 306, selection 1260/2000 units; elapsed 77.584s, 2.887 games/s
+Checkpoint saved: generation 11
+Generation 12: Default anchor completed (1 pairs/individual, 64 games, candidates 7/128)
+Generation 12/100 completed: best individual 343, selection 1440/2000 units; elapsed 78.817s, 2.842 games/s
+Checkpoint saved: generation 12
+Generation 13: Default anchor completed (1 pairs/individual, 64 games, candidates 9/128)
+Generation 13/100 completed: best individual 366, selection 1260/2000 units; elapsed 82.176s, 2.726 games/s
+Checkpoint saved: generation 13
+Generation 14: Default anchor completed (1 pairs/individual, 64 games, candidates 11/128)
+Generation 14/100 completed: best individual 401, selection 1360/2000 units; elapsed 80.050s, 2.798 games/s
+Checkpoint saved: generation 14
+Generation 15: Default anchor completed (1 pairs/individual, 64 games, candidates 9/128)
+Generation 15/100 completed: best individual 424, selection 1130/2000 units; elapsed 75.157s, 2.980 games/s
+Checkpoint saved: generation 15
+Generation 16: Default anchor completed (1 pairs/individual, 64 games, candidates 6/128)
+Generation 16/100 completed: best individual 474, selection 1400/2000 units; elapsed 59.355s, 3.774 games/s
+Checkpoint saved: generation 16
+Generation 17: Default anchor completed (1 pairs/individual, 64 games, candidates 19/128)
+Generation 17/100 completed: best individual 492, selection 1220/2000 units; elapsed 56.850s, 3.940 games/s
+Checkpoint saved: generation 17
+Generation 18: Default anchor completed (1 pairs/individual, 64 games, candidates 37/128)
+Generation 18/100 completed: best individual 521, selection 1310/2000 units; elapsed 59.421s, 3.770 games/s
+Checkpoint saved: generation 18
+Generation 19: Default anchor completed (1 pairs/individual, 64 games, candidates 4/128)
+Generation 19/100 completed: best individual 553, selection 1260/2000 units; elapsed 57.248s, 3.913 games/s
+Checkpoint saved: generation 19
+Generation 20: Default anchor completed (1 pairs/individual, 64 games, candidates 16/128)
+Generation 20/100 completed: best individual 592, selection 1220/2000 units; elapsed 56.820s, 3.942 games/s
+Checkpoint saved: generation 20
+Generation 21: Default anchor completed (1 pairs/individual, 64 games, candidates 17/128)
+Generation 21/100 completed: best individual 626, selection 1400/2000 units; elapsed 56.401s, 3.972 games/s
+Checkpoint saved: generation 21
+Generation 22: Default anchor completed (1 pairs/individual, 64 games, candidates 24/128)
+Generation 22/100 completed: best individual 653, selection 1400/2000 units; elapsed 63.742s, 3.514 games/s
+Checkpoint saved: generation 22
+Generation 23: Default anchor completed (1 pairs/individual, 64 games, candidates 11/128)
+Generation 23/100 completed: best individual 664, selection 1260/2000 units; elapsed 80.802s, 2.772 games/s
+Checkpoint saved: generation 23
+Generation 24: Default anchor completed (1 pairs/individual, 64 games, candidates 37/128)
+Generation 24/100 completed: best individual 695, selection 1220/2000 units; elapsed 51.784s, 4.326 games/s
+Checkpoint saved: generation 24
+Generation 25: Default anchor completed (1 pairs/individual, 64 games, candidates 8/128)
+Generation 25/100 completed: best individual 729, selection 1350/2000 units; elapsed 54.694s, 4.096 games/s
+Checkpoint saved: generation 25
+Generation 26: Default anchor completed (1 pairs/individual, 64 games, candidates 14/128)
+Generation 26/100 completed: best individual 729, selection 1310/2000 units; elapsed 65.024s, 3.445 games/s
+Checkpoint saved: generation 26
+Generation 27: Default anchor completed (1 pairs/individual, 64 games, candidates 27/128)
+Generation 27/100 completed: best individual 784, selection 1220/2000 units; elapsed 66.611s, 3.363 games/s
+Checkpoint saved: generation 27
+Generation 28: Default anchor completed (1 pairs/individual, 64 games, candidates 21/128)
+Generation 28/100 completed: best individual 826, selection 1260/2000 units; elapsed 79.902s, 2.803 games/s
+Checkpoint saved: generation 28
+Generation 29: Default anchor completed (1 pairs/individual, 64 games, candidates 10/128)
+Generation 29/100 completed: best individual 857, selection 1220/2000 units; elapsed 72.775s, 3.078 games/s
+Checkpoint saved: generation 29
+Generation 30: Default anchor completed (1 pairs/individual, 64 games, candidates 15/128)
+Generation 30/100 completed: best individual 895, selection 1220/2000 units; elapsed 60.397s, 3.709 games/s
+Checkpoint saved: generation 30
+Generation 31: Default anchor completed (1 pairs/individual, 64 games, candidates 16/128)
+Generation 31/100 completed: best individual 910, selection 1220/2000 units; elapsed 76.422s, 2.931 games/s
+Checkpoint saved: generation 31
+Generation 32: Default anchor completed (1 pairs/individual, 64 games, candidates 10/128)
+Generation 32/100 completed: best individual 938, selection 1220/2000 units; elapsed 89.139s, 2.513 games/s
+Checkpoint saved: generation 32
+Generation 33: Default anchor completed (1 pairs/individual, 64 games, candidates 11/128)
+Generation 33/100 completed: best individual 962, selection 1220/2000 units; elapsed 81.611s, 2.745 games/s
+Checkpoint saved: generation 33
+Generation 34: Default anchor completed (1 pairs/individual, 64 games, candidates 29/128)
+Generation 34/100 completed: best individual 1015, selection 1400/2000 units; elapsed 77.486s, 2.891 games/s
+Checkpoint saved: generation 34
+Generation 35: Default anchor completed (1 pairs/individual, 64 games, candidates 35/128)
+Generation 35/100 completed: best individual 1027, selection 1320/2000 units; elapsed 79.976s, 2.801 games/s
+Checkpoint saved: generation 35
+Generation 36: Default anchor completed (1 pairs/individual, 64 games, candidates 43/128)
+Generation 36/100 completed: best individual 1072, selection 1310/2000 units; elapsed 96.728s, 2.316 games/s
+Checkpoint saved: generation 36
+Generation 37: Default anchor completed (1 pairs/individual, 64 games, candidates 21/128)
+Generation 37/100 completed: best individual 1106, selection 1440/2000 units; elapsed 66.523s, 3.367 games/s
+Checkpoint saved: generation 37
+Generation 38: Default anchor completed (1 pairs/individual, 64 games, candidates 16/128)
+Generation 38/100 completed: best individual 1119, selection 1260/2000 units; elapsed 91.208s, 2.456 games/s
+Checkpoint saved: generation 38
+Generation 39: Default anchor completed (1 pairs/individual, 64 games, candidates 5/128)
+Generation 39/100 completed: best individual 1165, selection 1350/2000 units; elapsed 60.409s, 3.708 games/s
+Checkpoint saved: generation 39
+Generation 40: Default anchor completed (1 pairs/individual, 64 games, candidates 27/128)
+Generation 40/100 completed: best individual 1201, selection 1310/2000 units; elapsed 99.184s, 2.258 games/s
+Checkpoint saved: generation 40
+Generation 41: Default anchor completed (1 pairs/individual, 64 games, candidates 17/128)
+Generation 41/100 completed: best individual 1207, selection 1260/2000 units; elapsed 65.900s, 3.399 games/s
+Checkpoint saved: generation 41
+Generation 42: Default anchor completed (1 pairs/individual, 64 games, candidates 22/128)
+Generation 42/100 completed: best individual 1261, selection 1270/2000 units; elapsed 72.270s, 3.100 games/s
+Checkpoint saved: generation 42
+Generation 43: Default anchor completed (1 pairs/individual, 64 games, candidates 14/128)
+Generation 43/100 completed: best individual 1262, selection 1310/2000 units; elapsed 69.455s, 3.225 games/s
+Checkpoint saved: generation 43
+Generation 44: Default anchor completed (1 pairs/individual, 64 games, candidates 27/128)
+Generation 44/100 completed: best individual 1315, selection 1310/2000 units; elapsed 93.492s, 2.396 games/s
+Checkpoint saved: generation 44
+Generation 45: Default anchor completed (1 pairs/individual, 64 games, candidates 12/128)
+Generation 45/100 completed: best individual 1344, selection 1310/2000 units; elapsed 84.931s, 2.637 games/s
+Checkpoint saved: generation 45
+Generation 46: Default anchor completed (1 pairs/individual, 64 games, candidates 5/128)
+Generation 46/100 completed: best individual 1371, selection 1360/2000 units; elapsed 68.439s, 3.273 games/s
+Checkpoint saved: generation 46
+Generation 47: Default anchor completed (1 pairs/individual, 64 games, candidates 35/128)
+Generation 47/100 completed: best individual 1411, selection 1350/2000 units; elapsed 79.205s, 2.828 games/s
+Checkpoint saved: generation 47
+Generation 48: Default anchor completed (1 pairs/individual, 64 games, candidates 11/128)
+Generation 48/100 completed: best individual 1428, selection 1220/2000 units; elapsed 78.016s, 2.871 games/s
+Checkpoint saved: generation 48

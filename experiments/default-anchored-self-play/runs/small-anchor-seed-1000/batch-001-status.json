@@ -1,0 +1,12 @@
+﻿{
+    "batch":  1,
+    "state":  "completed",
+    "reason":  "time_box_complete",
+    "process_id":  19624,
+    "started_at_utc":  "2026-07-25T10:29:23.3923705Z",
+    "ended_at_utc":  "2026-07-25T11:29:26.1809767Z",
+    "elapsed_seconds":  3602.789,
+    "checkpoint_next_generation":  48,
+    "stdout_log":  "batch-001-stdout.log",
+    "stderr_log":  "batch-001-stderr.log"
+}
