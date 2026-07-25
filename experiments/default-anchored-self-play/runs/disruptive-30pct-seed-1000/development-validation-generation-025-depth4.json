@@ -1,0 +1,459 @@
+{
+  "format": "blocky-evolution-validation",
+  "version": 1,
+  "training_seed": 1000,
+  "selector": {
+    "kind": "generation",
+    "human_generation": 25,
+    "stored_generation_index": 24
+  },
+  "candidate": {
+    "individual": {
+      "id": 730,
+      "genes": [
+        0.8008899977479277,
+        0.8215125379591723,
+        1.0,
+        0.6212743400567184,
+        0.7895384858713761,
+        0.4870429286843061,
+        0.6562629634591786,
+        0.3887876169125469,
+        0.41300873253494935,
+        0.985240985874738,
+        0.1623354725796575,
+        0.6285853926858397
+      ],
+      "gene_bits": [
+        4605388995336121065,
+        4605574746664942654,
+        4607182418800017408,
+        4603771161318024992,
+        4605286750006806406,
+        4602445405326450224,
+        4604086310820660044,
+        4600675394984520357,
+        4601111723813686555,
+        4607049481418987636,
+        4595016772081085495,
+        4603837013425817385
+      ]
+    },
+    "selection_score": {
+      "units": 3180,
+      "maximum_units": 6000
+    },
+    "self_play_score": {
+      "half_points": 13,
+      "available_half_points": 20
+    },
+    "default_anchor_score": {
+      "half_points": 3,
+      "available_half_points": 12
+    }
+  },
+  "validation_config": {
+    "search_depths": [
+      4
+    ],
+    "opening_count": 20,
+    "max_game_plies": 200,
+    "master_seed": 2026072501,
+    "opening_min_plies": 4,
+    "opening_max_plies": 10,
+    "max_opening_attempts": 100,
+    "minimum_margin_half_points": 1
+  },
+  "validation": {
+    "candidate_score_half_points": 24,
+    "reference_score_half_points": 56,
+    "accepted": false,
+    "by_depth": [
+      {
+        "search_depth": 4,
+        "candidate_score_half_points": 24,
+        "reference_score_half_points": 56,
+        "accepted": false,
+        "statistics": {
+          "games": 40,
+          "white_wins": 10,
+          "black_wins": 10,
+          "draws": 20,
+          "stalemates": 0,
+          "insufficient_material": 0,
+          "threefold_repetitions": 20,
+          "fifty_move_rule": 0,
+          "max_plies_draws": 0,
+          "total_plies": 2525,
+          "mean_plies": 63.125,
+          "minimum_plies": 27,
+          "median_plies": 59,
+          "p95_plies": 102,
+          "maximum_plies": 108
+        },
+        "openings": [
+          {
+            "opening_id": 0,
+            "opening_seed": 1190829860619516317,
+            "candidate_score_half_points": 2,
+            "reference_score_half_points": 2,
+            "games": [
+              {
+                "outcome": "draw",
+                "draw_reason": "threefold_repetition",
+                "plies": 108
+              },
+              {
+                "outcome": "draw",
+                "draw_reason": "threefold_repetition",
+                "plies": 46
+              }
+            ]
+          },
+          {
+            "opening_id": 1,
+            "opening_seed": 147469584900098449,
+            "candidate_score_half_points": 2,
+            "reference_score_half_points": 2,
+            "games": [
+              {
+                "outcome": "black_win",
+                "draw_reason": null,
+                "plies": 44
+              },
+              {
+                "outcome": "black_win",
+                "draw_reason": null,
+                "plies": 52
+              }
+            ]
+          },
+          {
+            "opening_id": 2,
+            "opening_seed": 12609030500957357103,
+            "candidate_score_half_points": 1,
+            "reference_score_half_points": 3,
+            "games": [
+              {
+                "outcome": "draw",
+                "draw_reason": "threefold_repetition",
+                "plies": 43
+              },
+              {
+                "outcome": "white_win",
+                "draw_reason": null,
+                "plies": 59
+              }
+            ]
+          },
+          {
+            "opening_id": 3,
+            "opening_seed": 7975154411463212824,
+            "candidate_score_half_points": 1,
+            "reference_score_half_points": 3,
+            "games": [
+              {
+                "outcome": "draw",
+                "draw_reason": "threefold_repetition",
+                "plies": 85
+              },
+              {
+                "outcome": "white_win",
+                "draw_reason": null,
+                "plies": 43
+              }
+            ]
+          },
+          {
+            "opening_id": 4,
+            "opening_seed": 11878062653495480300,
+            "candidate_score_half_points": 2,
+            "reference_score_half_points": 2,
+            "games": [
+              {
+                "outcome": "draw",
+                "draw_reason": "threefold_repetition",
+                "plies": 27
+              },
+              {
+                "outcome": "draw",
+                "draw_reason": "threefold_repetition",
+                "plies": 62
+              }
+            ]
+          },
+          {
+            "opening_id": 5,
+            "opening_seed": 9687984249206776517,
+            "candidate_score_half_points": 0,
+            "reference_score_half_points": 4,
+            "games": [
+              {
+                "outcome": "black_win",
+                "draw_reason": null,
+                "plies": 90
+              },
+              {
+                "outcome": "white_win",
+                "draw_reason": null,
+                "plies": 53
+              }
+            ]
+          },
+          {
+            "opening_id": 6,
+            "opening_seed": 14161651914101413824,
+            "candidate_score_half_points": 2,
+            "reference_score_half_points": 2,
+            "games": [
+              {
+                "outcome": "white_win",
+                "draw_reason": null,
+                "plies": 27
+              },
+              {
+                "outcome": "white_win",
+                "draw_reason": null,
+                "plies": 51
+              }
+            ]
+          },
+          {
+            "opening_id": 7,
+            "opening_seed": 425068128035329512,
+            "candidate_score_half_points": 2,
+            "reference_score_half_points": 2,
+            "games": [
+              {
+                "outcome": "draw",
+                "draw_reason": "threefold_repetition",
+                "plies": 42
+              },
+              {
+                "outcome": "draw",
+                "draw_reason": "threefold_repetition",
+                "plies": 63
+              }
+            ]
+          },
+          {
+            "opening_id": 8,
+            "opening_seed": 3945377287482203102,
+            "candidate_score_half_points": 2,
+            "reference_score_half_points": 2,
+            "games": [
+              {
+                "outcome": "draw",
+                "draw_reason": "threefold_repetition",
+                "plies": 42
+              },
+              {
+                "outcome": "draw",
+                "draw_reason": "threefold_repetition",
+                "plies": 28
+              }
+            ]
+          },
+          {
+            "opening_id": 9,
+            "opening_seed": 14142085466666377632,
+            "candidate_score_half_points": 1,
+            "reference_score_half_points": 3,
+            "games": [
+              {
+                "outcome": "black_win",
+                "draw_reason": null,
+                "plies": 56
+              },
+              {
+                "outcome": "draw",
+                "draw_reason": "threefold_repetition",
+                "plies": 44
+              }
+            ]
+          },
+          {
+            "opening_id": 10,
+            "opening_seed": 3252916551574611135,
+            "candidate_score_half_points": 2,
+            "reference_score_half_points": 2,
+            "games": [
+              {
+                "outcome": "draw",
+                "draw_reason": "threefold_repetition",
+                "plies": 102
+              },
+              {
+                "outcome": "draw",
+                "draw_reason": "threefold_repetition",
+                "plies": 103
+              }
+            ]
+          },
+          {
+            "opening_id": 11,
+            "opening_seed": 364960718330901835,
+            "candidate_score_half_points": 1,
+            "reference_score_half_points": 3,
+            "games": [
+              {
+                "outcome": "draw",
+                "draw_reason": "threefold_repetition",
+                "plies": 61
+              },
+              {
+                "outcome": "white_win",
+                "draw_reason": null,
+                "plies": 79
+              }
+            ]
+          },
+          {
+            "opening_id": 12,
+            "opening_seed": 11709215661571287869,
+            "candidate_score_half_points": 1,
+            "reference_score_half_points": 3,
+            "games": [
+              {
+                "outcome": "black_win",
+                "draw_reason": null,
+                "plies": 84
+              },
+              {
+                "outcome": "draw",
+                "draw_reason": "threefold_repetition",
+                "plies": 101
+              }
+            ]
+          },
+          {
+            "opening_id": 13,
+            "opening_seed": 18222131007818579967,
+            "candidate_score_half_points": 2,
+            "reference_score_half_points": 2,
+            "games": [
+              {
+                "outcome": "draw",
+                "draw_reason": "threefold_repetition",
+                "plies": 43
+              },
+              {
+                "outcome": "draw",
+                "draw_reason": "threefold_repetition",
+                "plies": 80
+              }
+            ]
+          },
+          {
+            "opening_id": 14,
+            "opening_seed": 11222820244694999692,
+            "candidate_score_half_points": 0,
+            "reference_score_half_points": 4,
+            "games": [
+              {
+                "outcome": "black_win",
+                "draw_reason": null,
+                "plies": 70
+              },
+              {
+                "outcome": "white_win",
+                "draw_reason": null,
+                "plies": 65
+              }
+            ]
+          },
+          {
+            "opening_id": 15,
+            "opening_seed": 14995439995755946818,
+            "candidate_score_half_points": 0,
+            "reference_score_half_points": 4,
+            "games": [
+              {
+                "outcome": "black_win",
+                "draw_reason": null,
+                "plies": 102
+              },
+              {
+                "outcome": "white_win",
+                "draw_reason": null,
+                "plies": 57
+              }
+            ]
+          },
+          {
+            "opening_id": 16,
+            "opening_seed": 15061602264672506273,
+            "candidate_score_half_points": 1,
+            "reference_score_half_points": 3,
+            "games": [
+              {
+                "outcome": "black_win",
+                "draw_reason": null,
+                "plies": 86
+              },
+              {
+                "outcome": "draw",
+                "draw_reason": "threefold_repetition",
+                "plies": 88
+              }
+            ]
+          },
+          {
+            "opening_id": 17,
+            "opening_seed": 12476606478308338455,
+            "candidate_score_half_points": 1,
+            "reference_score_half_points": 3,
+            "games": [
+              {
+                "outcome": "draw",
+                "draw_reason": "threefold_repetition",
+                "plies": 53
+              },
+              {
+                "outcome": "white_win",
+                "draw_reason": null,
+                "plies": 31
+              }
+            ]
+          },
+          {
+            "opening_id": 18,
+            "opening_seed": 12985448043174949291,
+            "candidate_score_half_points": 0,
+            "reference_score_half_points": 4,
+            "games": [
+              {
+                "outcome": "black_win",
+                "draw_reason": null,
+                "plies": 74
+              },
+              {
+                "outcome": "white_win",
+                "draw_reason": null,
+                "plies": 63
+              }
+            ]
+          },
+          {
+            "opening_id": 19,
+            "opening_seed": 11095822548103443807,
+            "candidate_score_half_points": 1,
+            "reference_score_half_points": 3,
+            "games": [
+              {
+                "outcome": "black_win",
+                "draw_reason": null,
+                "plies": 68
+              },
+              {
+                "outcome": "draw",
+                "draw_reason": "threefold_repetition",
+                "plies": 50
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
