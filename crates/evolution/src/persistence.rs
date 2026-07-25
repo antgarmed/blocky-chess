@@ -6,6 +6,8 @@ use std::{
     fmt, fs, io,
     io::Write,
     path::{Path, PathBuf},
+    thread,
+    time::Duration,
 };
 
 use serde::{Deserialize, Serialize};
@@ -27,6 +29,8 @@ use crate::{
 pub const PERSISTENCE_FORMAT: &str = "blocky-evolution";
 pub const PERSISTENCE_VERSION: u32 = 2;
 const LEGACY_PERSISTENCE_VERSION: u32 = 1;
+const WINDOWS_SHARING_RETRY_ATTEMPTS: usize = 21;
+const WINDOWS_SHARING_RETRY_DELAY: Duration = Duration::from_millis(100);
 
 #[derive(Debug)]
 pub enum PersistenceError {
@@ -262,20 +266,53 @@ pub(crate) fn write_json_atomically<T: Serialize>(
     drop(temporary_file);
 
     if path.exists() {
-        fs::rename(path, &backup)
+        retry_windows_sharing_violation(|| fs::rename(path, &backup))
             .map_err(|source| io_error("prepare replacement of", path, source))?;
     }
-    if let Err(source) = fs::rename(&temporary, path) {
+    if let Err(source) = retry_windows_sharing_violation(|| fs::rename(&temporary, path)) {
         if backup.exists() {
-            let _ = fs::rename(&backup, path);
+            let _ = retry_windows_sharing_violation(|| fs::rename(&backup, path));
         }
         let _ = fs::remove_file(&temporary);
         return Err(io_error("replace", path, source));
     }
     if backup.exists() {
-        fs::remove_file(&backup).map_err(|source| io_error("remove backup for", path, source))?;
+        retry_windows_sharing_violation(|| fs::remove_file(&backup))
+            .map_err(|source| io_error("remove backup for", path, source))?;
     }
     Ok(())
+}
+
+fn retry_windows_sharing_violation<T>(operation: impl FnMut() -> io::Result<T>) -> io::Result<T> {
+    retry_io(
+        operation,
+        WINDOWS_SHARING_RETRY_ATTEMPTS,
+        |error| {
+            cfg!(windows)
+                && matches!(
+                    error.raw_os_error(),
+                    Some(32 | 33) // sharing or lock violation
+                )
+        },
+        || thread::sleep(WINDOWS_SHARING_RETRY_DELAY),
+    )
+}
+
+fn retry_io<T>(
+    mut operation: impl FnMut() -> io::Result<T>,
+    attempts: usize,
+    should_retry: impl Fn(&io::Error) -> bool,
+    mut wait: impl FnMut(),
+) -> io::Result<T> {
+    debug_assert!(attempts > 0);
+    for attempt in 1..=attempts {
+        match operation() {
+            Ok(value) => return Ok(value),
+            Err(error) if attempt < attempts && should_retry(&error) => wait(),
+            Err(error) => return Err(error),
+        }
+    }
+    unreachable!("a positive attempt count always returns")
 }
 
 #[derive(Serialize)]
@@ -975,6 +1012,58 @@ mod tests {
         assert_eq!(read_checkpoint(&output, &config()).unwrap(), expected);
 
         fs::remove_file(output).unwrap();
+    }
+
+    #[test]
+    fn retries_only_transient_windows_sharing_violations_with_a_fixed_bound() {
+        let mut calls = 0;
+        let mut waits = 0;
+        let result = retry_io(
+            || {
+                calls += 1;
+                if calls < 3 {
+                    Err(io::Error::from_raw_os_error(32))
+                } else {
+                    Ok("written")
+                }
+            },
+            4,
+            |error| matches!(error.raw_os_error(), Some(32 | 33)),
+            || waits += 1,
+        );
+        assert_eq!(result.unwrap(), "written");
+        assert_eq!(calls, 3);
+        assert_eq!(waits, 2);
+
+        let mut permanent_calls = 0;
+        let error = retry_io(
+            || {
+                permanent_calls += 1;
+                Err::<(), _>(io::Error::from_raw_os_error(5))
+            },
+            4,
+            |error| matches!(error.raw_os_error(), Some(32 | 33)),
+            || panic!("a permanent error must not wait"),
+        )
+        .unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(5));
+        assert_eq!(permanent_calls, 1);
+
+        let mut exhausted_calls = 0;
+        let mut exhausted_waits = 0;
+        let error = retry_io(
+            || {
+                exhausted_calls += 1;
+                Err::<(), _>(io::Error::from_raw_os_error(33))
+            },
+            3,
+            |error| matches!(error.raw_os_error(), Some(32 | 33)),
+            || exhausted_waits += 1,
+        )
+        .unwrap_err();
+        assert_eq!(error.raw_os_error(), Some(33));
+        assert_eq!(exhausted_calls, 3);
+        assert_eq!(exhausted_waits, 2);
     }
 
     #[test]
