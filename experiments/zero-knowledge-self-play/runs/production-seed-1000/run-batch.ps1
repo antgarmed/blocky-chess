@@ -5,7 +5,7 @@ param(
 
 $ErrorActionPreference = "Stop"
 $runDirectory = $PSScriptRoot
-$repository = (Resolve-Path (Join-Path $runDirectory "..\..\..")).Path
+$repository = (Resolve-Path (Join-Path $runDirectory "..\..\..\..")).Path
 $executable = Join-Path $repository "target\release\blocky-evolution.exe"
 $checkpoint = Join-Path $runDirectory "checkpoint.json"
 $report = Join-Path $runDirectory "report-depth4.json"
