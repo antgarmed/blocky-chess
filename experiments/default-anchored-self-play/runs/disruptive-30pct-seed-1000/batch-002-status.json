@@ -1,0 +1,12 @@
+﻿{
+    "batch":  2,
+    "state":  "completed",
+    "reason":  "pilot_gate_complete",
+    "process_id":  42776,
+    "started_at_utc":  "2026-07-25T15:01:20.6504459Z",
+    "ended_at_utc":  "2026-07-25T15:39:17.1762818Z",
+    "elapsed_seconds":  2276.526,
+    "checkpoint_next_generation":  50,
+    "stdout_log":  "batch-002-stdout.log",
+    "stderr_log":  "batch-002-stderr.log"
+}
