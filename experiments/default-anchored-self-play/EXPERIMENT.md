@@ -73,6 +73,29 @@ results.
 
 ## 5. Anchored Fitness
 
+The implementation exposes the condition through:
+
+```text
+--default-anchor-weight-percent N
+--default-anchor-opening-pairs N
+```
+
+Both values default to zero. The small-anchor pilot uses `10` and `1`.
+Ranking uses an exactly equivalent integer cross-product of the two normalized
+score rates; floating-point arithmetic is not used for selection.
+
+Checkpoint and experiment-report schema version 2 stores, for every ranked
+individual and best-ever candidate:
+
+- self-play half-points and available half-points;
+- Default-anchor half-points and available half-points, when enabled;
+- composite selection units and their maximum.
+
+The composite can therefore be reconstructed from the raw components and
+configuration. Version-1 zero-anchor checkpoints remain readable through an
+explicit legacy mapping, while new documents no longer describe composite
+selection units as `fitness_half_points`.
+
 For each individual, calculate two normalized score rates:
 
 ```text

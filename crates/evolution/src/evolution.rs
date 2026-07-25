@@ -10,7 +10,8 @@ use std::{
 
 use crate::{
     encounter::{
-        ParallelRoundExecutor, RoundExecutionError, RoundExecutor, SequentialRoundExecutor,
+        DefaultAnchorRoundExecutor, ParallelRoundExecutor, RoundExecutionError, RoundExecutor,
+        SequentialRoundExecutor,
     },
     genome::{Genome, GenomeError, GENE_COUNT},
     openings::{OpeningGenerationError, OpeningPool},
@@ -31,6 +32,43 @@ const DEFAULT_STRONG_MUTATION_PROBABILITY: f64 = 0.02;
 const DEFAULT_MUTATION_STEP: f64 = 0.10;
 const DEFAULT_STRONG_MUTATION_STEP: f64 = 0.50;
 const OFFSPRING_DUPLICATE_RETRIES: usize = 8;
+const ANCHOR_SEED_DOMAIN: u64 = 0x414e_4348_4f52;
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct DefaultAnchorConfig {
+    weight_percent: u8,
+    opening_pairs: usize,
+}
+
+impl DefaultAnchorConfig {
+    pub fn new(weight_percent: u8, opening_pairs: usize) -> Result<Self, EvolutionConfigError> {
+        if weight_percent > 100 {
+            return Err(EvolutionConfigError::AnchorWeightOutOfRange(weight_percent));
+        }
+        if (weight_percent == 0) != (opening_pairs == 0) {
+            return Err(EvolutionConfigError::InconsistentAnchorConfiguration {
+                weight_percent,
+                opening_pairs,
+            });
+        }
+        Ok(Self {
+            weight_percent,
+            opening_pairs,
+        })
+    }
+
+    pub const fn weight_percent(self) -> u8 {
+        self.weight_percent
+    }
+
+    pub const fn opening_pairs(self) -> usize {
+        self.opening_pairs
+    }
+
+    pub const fn enabled(self) -> bool {
+        self.weight_percent > 0
+    }
+}
 
 /// All hyperparameters required by an in-memory evolutionary run.
 #[derive(Clone, Debug, PartialEq)]
@@ -45,6 +83,7 @@ pub struct EvolutionConfig {
     strong_mutation_probability: f64,
     mutation_step: f64,
     strong_mutation_step: f64,
+    default_anchor: DefaultAnchorConfig,
 }
 
 impl EvolutionConfig {
@@ -107,7 +146,26 @@ impl EvolutionConfig {
             strong_mutation_probability,
             mutation_step,
             strong_mutation_step,
+            default_anchor: DefaultAnchorConfig::default(),
         })
+    }
+
+    pub fn with_default_anchor(
+        mut self,
+        default_anchor: DefaultAnchorConfig,
+    ) -> Result<Self, EvolutionConfigError> {
+        self.default_anchor =
+            DefaultAnchorConfig::new(default_anchor.weight_percent, default_anchor.opening_pairs)?;
+        if self.default_anchor.enabled()
+            && 400_u128 * self.swiss_rounds as u128 * self.default_anchor.opening_pairs as u128
+                > u128::from(u32::MAX)
+        {
+            return Err(EvolutionConfigError::AnchorScoreOverflow {
+                swiss_rounds: self.swiss_rounds,
+                opening_pairs: self.default_anchor.opening_pairs,
+            });
+        }
+        Ok(self)
     }
 
     pub const fn training(&self) -> &TrainingConfig {
@@ -139,6 +197,9 @@ impl EvolutionConfig {
     }
     pub const fn strong_mutation_step(&self) -> f64 {
         self.strong_mutation_step
+    }
+    pub const fn default_anchor(&self) -> DefaultAnchorConfig {
+        self.default_anchor
     }
 }
 
@@ -200,6 +261,15 @@ pub enum EvolutionConfigError {
         name: &'static str,
         value: f64,
     },
+    AnchorWeightOutOfRange(u8),
+    InconsistentAnchorConfiguration {
+        weight_percent: u8,
+        opening_pairs: usize,
+    },
+    AnchorScoreOverflow {
+        swiss_rounds: usize,
+        opening_pairs: usize,
+    },
 }
 
 impl fmt::Display for EvolutionConfigError {
@@ -230,11 +300,112 @@ impl Individual {
 #[derive(Clone, Debug, PartialEq)]
 pub struct EvaluatedIndividual {
     individual: Individual,
-    fitness: Score,
+    fitness: FitnessScore,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct ScoreComponent {
+    half_points: Score,
+    available_half_points: u32,
+}
+
+impl ScoreComponent {
+    pub const fn new(half_points: Score, available_half_points: u32) -> Self {
+        Self {
+            half_points,
+            available_half_points,
+        }
+    }
+    pub const fn half_points(self) -> Score {
+        self.half_points
+    }
+    pub const fn available_half_points(self) -> u32 {
+        self.available_half_points
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct FitnessScore {
+    selection_units: Score,
+    maximum_selection_units: u32,
+    self_play: ScoreComponent,
+    default_anchor: Option<ScoreComponent>,
+}
+
+impl FitnessScore {
+    pub const fn legacy(half_points: Score) -> Self {
+        Self {
+            selection_units: half_points,
+            maximum_selection_units: 0,
+            self_play: ScoreComponent::new(half_points, 0),
+            default_anchor: None,
+        }
+    }
+    pub const fn new(
+        selection_units: Score,
+        maximum_selection_units: u32,
+        self_play: ScoreComponent,
+        default_anchor: Option<ScoreComponent>,
+    ) -> Self {
+        Self {
+            selection_units,
+            maximum_selection_units,
+            self_play,
+            default_anchor,
+        }
+    }
+    pub const fn selection_units(self) -> Score {
+        self.selection_units
+    }
+    pub const fn maximum_selection_units(self) -> u32 {
+        self.maximum_selection_units
+    }
+    pub const fn self_play(self) -> ScoreComponent {
+        self.self_play
+    }
+    pub const fn default_anchor(self) -> Option<ScoreComponent> {
+        self.default_anchor
+    }
+    pub const fn is_legacy(self) -> bool {
+        self.maximum_selection_units == 0
+    }
+
+    pub fn reconstruct_selection_units(
+        self,
+        swiss_rounds: usize,
+        anchor: DefaultAnchorConfig,
+    ) -> Option<Score> {
+        if self.is_legacy() {
+            return None;
+        }
+        if self.self_play.available_half_points != (swiss_rounds * 4) as u32 {
+            return None;
+        }
+        match (anchor.enabled(), self.default_anchor) {
+            (false, None) => Some(self.self_play.half_points),
+            (true, Some(component))
+                if component.available_half_points == (anchor.opening_pairs() * 4) as u32 =>
+            {
+                Some(anchored_selection_score(
+                    self.self_play.half_points,
+                    component.half_points,
+                    swiss_rounds,
+                    anchor,
+                ))
+            }
+            _ => None,
+        }
+    }
 }
 
 impl EvaluatedIndividual {
     pub fn new(individual: Individual, fitness: Score) -> Self {
+        Self {
+            individual,
+            fitness: FitnessScore::legacy(fitness),
+        }
+    }
+    pub fn with_fitness(individual: Individual, fitness: FitnessScore) -> Self {
         Self {
             individual,
             fitness,
@@ -244,6 +415,9 @@ impl EvaluatedIndividual {
         &self.individual
     }
     pub const fn fitness(&self) -> Score {
+        self.fitness.selection_units()
+    }
+    pub const fn fitness_score(&self) -> FitnessScore {
         self.fitness
     }
 }
@@ -441,16 +615,29 @@ pub trait PopulationEvaluator {
     ) -> Result<Vec<Standing>, Self::Error> {
         self.evaluate(generation, population, config)
     }
+
+    fn fitness_score(
+        &self,
+        _individual: IndividualId,
+        standing: Score,
+        _config: &EvolutionConfig,
+    ) -> FitnessScore {
+        FitnessScore::legacy(standing)
+    }
 }
 
 pub struct SelfPlayPopulationEvaluator<E> {
     executor: E,
+    last_self_play_scores: BTreeMap<IndividualId, Score>,
+    last_anchor_scores: Option<BTreeMap<IndividualId, Score>>,
 }
 
 impl<R> SelfPlayPopulationEvaluator<SequentialRoundExecutor<R>> {
     pub fn new(runner: R) -> Self {
         Self {
             executor: SequentialRoundExecutor::new(runner),
+            last_self_play_scores: BTreeMap::new(),
+            last_anchor_scores: None,
         }
     }
 
@@ -463,11 +650,15 @@ impl<F> SelfPlayPopulationEvaluator<ParallelRoundExecutor<F>> {
     pub fn parallel(factory: F, workers: NonZeroUsize) -> Self {
         Self {
             executor: ParallelRoundExecutor::new(factory, workers),
+            last_self_play_scores: BTreeMap::new(),
+            last_anchor_scores: None,
         }
     }
 }
 
-impl<E: RoundExecutor> PopulationEvaluator for SelfPlayPopulationEvaluator<E> {
+impl<E: RoundExecutor + DefaultAnchorRoundExecutor> PopulationEvaluator
+    for SelfPlayPopulationEvaluator<E>
+{
     type Error = SelfPlayEvaluationError<E::Error>;
 
     fn evaluate(
@@ -552,8 +743,122 @@ impl<E: RoundExecutor> PopulationEvaluator for SelfPlayPopulationEvaluator<E> {
             generation,
             statistics: GameStatistics::from_outcomes_and_plies(generation_games),
         });
+        self.last_self_play_scores = standings
+            .iter()
+            .map(|standing| (standing.individual, standing.score))
+            .collect();
+        self.last_anchor_scores = None;
+        let anchor = config.default_anchor();
+        if anchor.enabled() {
+            let condition_seed = derive_seed(
+                config.training().master_seed(),
+                u64::from(anchor.weight_percent()),
+                anchor.opening_pairs() as u64,
+            );
+            let anchor_seed = derive_seed(condition_seed, generation as u64, ANCHOR_SEED_DOMAIN);
+            let anchor_training = config.training().with_master_seed(anchor_seed);
+            let anchor_openings = OpeningPool::generate(anchor.opening_pairs(), &anchor_training)
+                .map_err(SelfPlayEvaluationError::Opening)?;
+            let candidates = population
+                .iter()
+                .map(|individual| (individual.id(), individual.genome().to_evaluation_config()))
+                .collect::<Vec<_>>();
+            let mut anchor_scores: BTreeMap<_, Score> = population
+                .iter()
+                .map(|individual| (individual.id(), Score(0)))
+                .collect();
+            let mut anchor_games = Vec::with_capacity(
+                population
+                    .len()
+                    .saturating_mul(anchor.opening_pairs())
+                    .saturating_mul(2),
+            );
+            for opening in anchor_openings.openings() {
+                let records = self
+                    .executor
+                    .play_default_anchor_round(&candidates, opening, &anchor_training)
+                    .map_err(SelfPlayEvaluationError::Round)?;
+                for record in records {
+                    anchor_scores
+                        .get_mut(&record.candidate)
+                        .expect("every anchor candidate belongs to the population")
+                        .0 += record.candidate_score.0;
+                    anchor_games.extend([
+                        (record.first_game.outcome, record.first_game.moves.len()),
+                        (record.second_game.outcome, record.second_game.moves.len()),
+                    ]);
+                }
+            }
+            let candidate_half_points = anchor_scores.values().map(|score| score.0).sum();
+            observer.on_event(ProgressEvent::DefaultAnchorCompleted {
+                generation,
+                opening_pairs: anchor.opening_pairs(),
+                games: anchor_games.len(),
+                candidate_half_points,
+                available_half_points: (population.len() * anchor.opening_pairs() * 4) as u32,
+                maximum_selection_units: 400
+                    * config.swiss_rounds() as u32
+                    * anchor.opening_pairs() as u32,
+                statistics: GameStatistics::from_outcomes_and_plies(anchor_games),
+            });
+            self.last_anchor_scores = Some(anchor_scores.clone());
+            for standing in &mut standings {
+                standing.score = anchored_selection_score(
+                    standing.score,
+                    anchor_scores[&standing.individual],
+                    config.swiss_rounds(),
+                    anchor,
+                );
+            }
+        }
         Ok(standings)
     }
+
+    fn fitness_score(
+        &self,
+        individual: IndividualId,
+        standing: Score,
+        config: &EvolutionConfig,
+    ) -> FitnessScore {
+        let self_play = self.last_self_play_scores[&individual];
+        let self_available = (config.swiss_rounds() * 4) as u32;
+        let anchor = config.default_anchor();
+        if !anchor.enabled() {
+            return FitnessScore::new(
+                standing,
+                self_available,
+                ScoreComponent::new(self_play, self_available),
+                None,
+            );
+        }
+        let anchor_available = (anchor.opening_pairs() * 4) as u32;
+        FitnessScore::new(
+            standing,
+            400 * config.swiss_rounds() as u32 * anchor.opening_pairs() as u32,
+            ScoreComponent::new(self_play, self_available),
+            Some(ScoreComponent::new(
+                self.last_anchor_scores
+                    .as_ref()
+                    .expect("anchored evaluation records anchor scores")[&individual],
+                anchor_available,
+            )),
+        )
+    }
+}
+
+pub fn anchored_selection_score(
+    self_play: Score,
+    anchor: Score,
+    swiss_rounds: usize,
+    config: DefaultAnchorConfig,
+) -> Score {
+    if !config.enabled() {
+        return self_play;
+    }
+    let self_weight = 100_u64 - u64::from(config.weight_percent());
+    let weighted = u64::from(self_play.0) * self_weight * config.opening_pairs() as u64
+        + u64::from(anchor.0) * u64::from(config.weight_percent()) * swiss_rounds as u64;
+    Score(u32::try_from(weighted).expect("validated evolution dimensions fit a score"))
 }
 
 #[derive(Debug)]
@@ -911,7 +1216,20 @@ impl<E: PopulationEvaluator> EvolutionEngine<E> {
                     self.observer.as_mut(),
                 )
                 .map_err(EvolutionError::Evaluation)?;
-            let ranked = rank_population(&population, standings)?;
+            let fitness_scores: BTreeMap<_, _> = standings
+                .iter()
+                .map(|standing| {
+                    (
+                        standing.individual,
+                        self.evaluator.fitness_score(
+                            standing.individual,
+                            standing.score,
+                            &self.config,
+                        ),
+                    )
+                })
+                .collect();
+            let ranked = rank_population_with_scores(&population, standings, &fitness_scores)?;
             if best_ever
                 .as_ref()
                 .is_none_or(|best| is_fitter(&ranked[0], best))
@@ -1035,9 +1353,22 @@ fn validate_population<E>(
     Ok(())
 }
 
+#[cfg(test)]
 fn rank_population<E>(
     population: &[Individual],
     standings: Vec<Standing>,
+) -> Result<Vec<EvaluatedIndividual>, EvolutionError<E>> {
+    let fitness_scores = standings
+        .iter()
+        .map(|standing| (standing.individual, FitnessScore::legacy(standing.score)))
+        .collect();
+    rank_population_with_scores(population, standings, &fitness_scores)
+}
+
+fn rank_population_with_scores<E>(
+    population: &[Individual],
+    standings: Vec<Standing>,
+    fitness_scores: &BTreeMap<IndividualId, FitnessScore>,
 ) -> Result<Vec<EvaluatedIndividual>, EvolutionError<E>> {
     if standings.len() != population.len() {
         return Err(EvolutionError::InvalidStandings);
@@ -1055,7 +1386,9 @@ fn rank_population<E>(
     }
     let mut ranked: Vec<_> = population
         .iter()
-        .map(|individual| EvaluatedIndividual::new(individual.clone(), scores[&individual.id()]))
+        .map(|individual| {
+            EvaluatedIndividual::with_fitness(individual.clone(), fitness_scores[&individual.id()])
+        })
         .collect();
     ranked.sort_by(|left, right| {
         right
@@ -1116,7 +1449,63 @@ mod tests {
     use std::{cell::RefCell, rc::Rc};
 
     use super::*;
-    use crate::encounter::GameRunner;
+    use crate::{
+        encounter::{ConfiguredGameRunner, GameRunner},
+        self_play::{DrawReason, GameOutcome, GameRecord},
+    };
+
+    #[derive(Default)]
+    struct RecordingDrawRunner {
+        calls: Vec<(Genome, Genome, u64)>,
+        configured_calls: Vec<(
+            blocky_chess::EvaluationConfig,
+            blocky_chess::EvaluationConfig,
+            u64,
+        )>,
+    }
+
+    impl ConfiguredGameRunner for RecordingDrawRunner {
+        type Error = std::convert::Infallible;
+
+        fn play_configured(
+            &mut self,
+            white: blocky_chess::EvaluationConfig,
+            black: blocky_chess::EvaluationConfig,
+            opening: &crate::openings::Opening,
+            _search_depth: usize,
+            _max_game_plies: usize,
+        ) -> Result<GameRecord, Self::Error> {
+            self.configured_calls.push((white, black, opening.seed));
+            Ok(GameRecord {
+                outcome: GameOutcome::Draw(DrawReason::MaxPlies),
+                moves: Vec::new(),
+                position_history: vec![opening.position.clone()],
+                final_position: opening.position.clone(),
+            })
+        }
+    }
+
+    impl GameRunner for RecordingDrawRunner {
+        type Error = std::convert::Infallible;
+
+        fn play(
+            &mut self,
+            white: &Genome,
+            black: &Genome,
+            opening: &crate::openings::Opening,
+            _search_depth: usize,
+            _max_game_plies: usize,
+        ) -> Result<GameRecord, Self::Error> {
+            self.calls
+                .push((white.clone(), black.clone(), opening.seed));
+            Ok(GameRecord {
+                outcome: GameOutcome::Draw(DrawReason::MaxPlies),
+                moves: Vec::new(),
+                position_history: vec![opening.position.clone()],
+                final_position: opening.position.clone(),
+            })
+        }
+    }
 
     fn config(generations: usize, elite_count: usize) -> EvolutionConfig {
         EvolutionConfig::new(
@@ -1147,6 +1536,112 @@ mod tests {
         assert_eq!(config.strong_mutation_probability(), 0.02);
         assert_eq!(config.mutation_step(), 0.1);
         assert_eq!(config.strong_mutation_step(), 0.5);
+        assert_eq!(config.default_anchor(), DefaultAnchorConfig::default());
+    }
+
+    #[test]
+    fn default_anchor_configuration_rejects_inconsistent_or_out_of_range_values() {
+        assert!(matches!(
+            DefaultAnchorConfig::new(101, 1),
+            Err(EvolutionConfigError::AnchorWeightOutOfRange(101))
+        ));
+        for (weight, pairs) in [(0, 1), (10, 0)] {
+            assert!(matches!(
+                DefaultAnchorConfig::new(weight, pairs),
+                Err(EvolutionConfigError::InconsistentAnchorConfiguration { .. })
+            ));
+        }
+        assert_eq!(
+            DefaultAnchorConfig::new(10, 1).unwrap().weight_percent(),
+            10
+        );
+        assert!(matches!(
+            config(1, 1).with_default_anchor(DefaultAnchorConfig::new(10, usize::MAX).unwrap()),
+            Err(EvolutionConfigError::AnchorScoreOverflow { .. })
+        ));
+    }
+
+    #[test]
+    fn anchored_ranking_uses_exact_normalized_integer_scores_and_preserves_ties() {
+        let anchor = DefaultAnchorConfig::new(10, 1).unwrap();
+        assert_eq!(
+            anchored_selection_score(Score(10), Score(2), 5, anchor),
+            Score(1000)
+        );
+        assert_eq!(
+            anchored_selection_score(Score(5), Score(1), 5, anchor),
+            Score(500)
+        );
+        assert_eq!(
+            anchored_selection_score(Score(7), Score(99), 5, DefaultAnchorConfig::default()),
+            Score(7)
+        );
+    }
+
+    #[test]
+    fn anchor_uses_literal_default_with_color_swap_and_an_isolated_opening_stream() {
+        let training = TrainingConfig::new(1, 1, 77, 0..=0, 10).unwrap();
+        let base = EvolutionConfig::new(training, 1, 4, 1, 1, 2, 0.15, 0.02, 0.1, 0.5).unwrap();
+        let anchored = base
+            .clone()
+            .with_default_anchor(DefaultAnchorConfig::new(10, 1).unwrap())
+            .unwrap();
+        let population = (0..4)
+            .map(|id| {
+                let mut genes = [1.0; GENE_COUNT];
+                genes[0] = (id + 1) as f64 / 10.0;
+                Individual::new(IndividualId(id), Genome::new(genes).unwrap())
+            })
+            .collect::<Vec<_>>();
+
+        let mut plain_evaluator = SelfPlayPopulationEvaluator::new(RecordingDrawRunner::default());
+        let plain = plain_evaluator.evaluate(0, &population, &base).unwrap();
+        let plain_calls = plain_evaluator.runner().calls.clone();
+
+        let mut anchored_evaluator =
+            SelfPlayPopulationEvaluator::new(RecordingDrawRunner::default());
+        let ranked = anchored_evaluator
+            .evaluate(0, &population, &anchored)
+            .unwrap();
+        let calls = &anchored_evaluator.runner().calls;
+        let configured_calls = &anchored_evaluator.runner().configured_calls;
+
+        assert_eq!(calls, &plain_calls);
+        assert_eq!(configured_calls.len(), population.len() * 2);
+        assert!(plain.iter().all(|standing| standing.score == Score(2)));
+        assert!(ranked.iter().all(|standing| standing.score == Score(200)));
+        for standing in &ranked {
+            let fitness =
+                anchored_evaluator.fitness_score(standing.individual, standing.score, &anchored);
+            assert_eq!(fitness.self_play(), ScoreComponent::new(Score(2), 4));
+            assert_eq!(
+                fitness.default_anchor(),
+                Some(ScoreComponent::new(Score(2), 4))
+            );
+            assert_eq!(fitness.maximum_selection_units(), 400);
+            assert_eq!(
+                fitness.reconstruct_selection_units(1, anchored.default_anchor()),
+                Some(standing.score)
+            );
+        }
+        for (candidate, pair) in population.iter().zip(configured_calls.chunks_exact(2)) {
+            assert_eq!(
+                (&pair[0].0, &pair[0].1),
+                (
+                    &candidate.genome().to_evaluation_config(),
+                    &blocky_chess::EvaluationConfig::default()
+                )
+            );
+            assert_eq!(
+                (&pair[1].0, &pair[1].1),
+                (
+                    &blocky_chess::EvaluationConfig::default(),
+                    &candidate.genome().to_evaluation_config()
+                )
+            );
+            assert_eq!(pair[0].2, pair[1].2);
+            assert_ne!(pair[0].2, plain_calls[0].2);
+        }
     }
 
     #[test]
@@ -1350,6 +1845,26 @@ mod tests {
         }
     }
 
+    impl ConfiguredGameRunner for DrawRunner {
+        type Error = std::convert::Infallible;
+
+        fn play_configured(
+            &mut self,
+            _white: blocky_chess::EvaluationConfig,
+            _black: blocky_chess::EvaluationConfig,
+            opening: &crate::openings::Opening,
+            _search_depth: usize,
+            _max_game_plies: usize,
+        ) -> Result<GameRecord, Self::Error> {
+            Ok(GameRecord {
+                outcome: GameOutcome::Draw(DrawReason::MaxPlies),
+                moves: vec![],
+                position_history: vec![opening.position.clone()],
+                final_position: opening.position.clone(),
+            })
+        }
+    }
+
     #[test]
     fn self_play_reports_each_completed_swiss_round() {
         let events = Rc::new(RefCell::new(vec![]));
@@ -1385,8 +1900,10 @@ mod tests {
     #[test]
     fn production_self_play_is_identical_for_one_and_many_workers() {
         let training = TrainingConfig::new(1, 1, 77, 2..=2, 100).unwrap();
-        let configuration =
-            EvolutionConfig::new(training, 2, 4, 2, 1, 2, 0.15, 0.02, 0.1, 0.5).unwrap();
+        let configuration = EvolutionConfig::new(training, 2, 4, 2, 1, 2, 0.15, 0.02, 0.1, 0.5)
+            .unwrap()
+            .with_default_anchor(DefaultAnchorConfig::new(10, 1).unwrap())
+            .unwrap();
         let mut sequential = EvolutionEngine::with_defaults(
             configuration.clone(),
             SelfPlayPopulationEvaluator::parallel(

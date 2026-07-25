@@ -89,6 +89,20 @@ cargo run --release -p blocky-evolution -- train --checkpoint training.json --re
 Use `cargo run --release -p blocky-evolution -- --help` to list all evolutionary,
 self-play, validation, parallelism, and persistence hyperparameters.
 
+Default-anchored training is an explicit opt-in experimental objective. For
+the small-anchor condition, retain every Swiss game and add one color-swapped
+opening pair against the literal default evaluation per individual:
+
+```bash
+cargo run --release -p blocky-evolution -- train \
+  --default-anchor-weight-percent 10 \
+  --default-anchor-opening-pairs 1
+```
+
+Both anchor options default to zero. A positive weight requires a positive
+pair count and vice versa, so an ordinary invocation preserves the original
+zero-knowledge self-play behavior.
+
 Standard output reports compact live progress: one startup line, one line per
 completed generation, checkpoint saves, and the final summary. Each line is
 flushed immediately so redirected logs can be monitored while training.

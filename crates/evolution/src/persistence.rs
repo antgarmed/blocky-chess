@@ -12,8 +12,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     evolution::{
-        EvaluatedIndividual, EvolutionConfig, EvolutionState, EvolutionStateError,
-        GenerationResult, Individual,
+        DefaultAnchorConfig, EvaluatedIndividual, EvolutionConfig, EvolutionState,
+        EvolutionStateError, FitnessScore, GenerationResult, Individual, ScoreComponent,
     },
     experiment::ExperimentReport,
     genome::{Genome, GENE_COUNT},
@@ -25,7 +25,8 @@ use crate::{
 };
 
 pub const PERSISTENCE_FORMAT: &str = "blocky-evolution";
-pub const PERSISTENCE_VERSION: u32 = 1;
+pub const PERSISTENCE_VERSION: u32 = 2;
+const LEGACY_PERSISTENCE_VERSION: u32 = 1;
 
 #[derive(Debug)]
 pub enum PersistenceError {
@@ -140,6 +141,29 @@ fn validate_checkpoint_state(
             "completed generations exceed configured target".into(),
         ));
     }
+    for evaluated in state
+        .generations()
+        .iter()
+        .flat_map(|generation| generation.ranked())
+        .chain(std::iter::once(state.best_ever()))
+    {
+        let fitness = evaluated.fitness_score();
+        if fitness.is_legacy() {
+            if config.default_anchor().enabled() {
+                return Err(PersistenceError::CorruptData(
+                    "anchored checkpoint contains legacy unaudited fitness".into(),
+                ));
+            }
+            continue;
+        }
+        let reconstructed =
+            fitness.reconstruct_selection_units(config.swiss_rounds(), config.default_anchor());
+        if reconstructed != Some(fitness.selection_units()) {
+            return Err(PersistenceError::CorruptData(
+                "selection score does not match its persisted components".into(),
+            ));
+        }
+    }
     let validate_individuals = |individuals: Vec<&Individual>| {
         if individuals.len() != config.population_size()
             || individuals
@@ -203,7 +227,7 @@ fn verify_header(format: &str, version: u32) -> Result<(), PersistenceError> {
     if format != PERSISTENCE_FORMAT {
         return Err(PersistenceError::WrongFormat(format.to_owned()));
     }
-    if version != PERSISTENCE_VERSION {
+    if version != PERSISTENCE_VERSION && version != LEGACY_PERSISTENCE_VERSION {
         return Err(PersistenceError::UnsupportedVersion(version));
     }
     Ok(())
@@ -336,6 +360,10 @@ struct EvolutionConfigData {
     strong_mutation_probability: f64,
     mutation_step: f64,
     strong_mutation_step: f64,
+    #[serde(default)]
+    default_anchor_weight_percent: u8,
+    #[serde(default)]
+    default_anchor_opening_pairs: usize,
 }
 
 impl From<&EvolutionConfig> for EvolutionConfigData {
@@ -351,6 +379,8 @@ impl From<&EvolutionConfig> for EvolutionConfigData {
             strong_mutation_probability: config.strong_mutation_probability(),
             mutation_step: config.mutation_step(),
             strong_mutation_step: config.strong_mutation_step(),
+            default_anchor_weight_percent: config.default_anchor().weight_percent(),
+            default_anchor_opening_pairs: config.default_anchor().opening_pairs(),
         }
     }
 }
@@ -369,6 +399,13 @@ impl TryFrom<EvolutionConfigData> for EvolutionConfig {
         .map_err(|error| {
             PersistenceError::CorruptData(format!("invalid training config: {error}"))
         })?;
+        let anchor = DefaultAnchorConfig::new(
+            value.default_anchor_weight_percent,
+            value.default_anchor_opening_pairs,
+        )
+        .map_err(|error| {
+            PersistenceError::CorruptData(format!("invalid default anchor config: {error}"))
+        })?;
         EvolutionConfig::new(
             training,
             value.generations,
@@ -383,6 +420,10 @@ impl TryFrom<EvolutionConfigData> for EvolutionConfig {
         )
         .map_err(|error| {
             PersistenceError::CorruptData(format!("invalid evolution config: {error}"))
+        })?
+        .with_default_anchor(anchor)
+        .map_err(|error| {
+            PersistenceError::CorruptData(format!("invalid default anchor config: {error}"))
         })
     }
 }
@@ -429,18 +470,69 @@ impl TryFrom<IndividualData> for Individual {
 }
 
 #[derive(Serialize, Deserialize)]
+#[serde(untagged)]
+enum EvaluatedIndividualData {
+    Current(CurrentEvaluatedIndividualData),
+    Legacy(LegacyEvaluatedIndividualData),
+}
+
+#[derive(Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
-struct EvaluatedIndividualData {
+struct CurrentEvaluatedIndividualData {
+    individual: IndividualData,
+    selection_score: SelectionScoreData,
+    self_play_score: ScoreComponentData,
+    default_anchor_score: Option<ScoreComponentData>,
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct LegacyEvaluatedIndividualData {
     individual: IndividualData,
     fitness_half_points: u32,
 }
 
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SelectionScoreData {
+    units: u32,
+    maximum_units: u32,
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ScoreComponentData {
+    half_points: u32,
+    available_half_points: u32,
+}
+
 impl From<&EvaluatedIndividual> for EvaluatedIndividualData {
     fn from(value: &EvaluatedIndividual) -> Self {
-        Self {
+        let fitness = value.fitness_score();
+        Self::Current(CurrentEvaluatedIndividualData {
             individual: IndividualData::from(value.individual()),
-            fitness_half_points: value.fitness().0,
+            selection_score: SelectionScoreData {
+                units: fitness.selection_units().0,
+                maximum_units: fitness.maximum_selection_units(),
+            },
+            self_play_score: ScoreComponentData::from(fitness.self_play()),
+            default_anchor_score: fitness.default_anchor().map(ScoreComponentData::from),
+        })
+    }
+}
+
+impl From<ScoreComponent> for ScoreComponentData {
+    fn from(value: ScoreComponent) -> Self {
+        Self {
+            half_points: value.half_points().0,
+            available_half_points: value.available_half_points(),
         }
+    }
+}
+
+impl From<ScoreComponentData> for ScoreComponent {
+    fn from(value: ScoreComponentData) -> Self {
+        Self::new(Score(value.half_points), value.available_half_points)
     }
 }
 
@@ -448,10 +540,21 @@ impl TryFrom<EvaluatedIndividualData> for EvaluatedIndividual {
     type Error = PersistenceError;
 
     fn try_from(value: EvaluatedIndividualData) -> Result<Self, Self::Error> {
-        Ok(Self::new(
-            value.individual.try_into()?,
-            Score(value.fitness_half_points),
-        ))
+        match value {
+            EvaluatedIndividualData::Current(value) => Ok(Self::with_fitness(
+                value.individual.try_into()?,
+                FitnessScore::new(
+                    Score(value.selection_score.units),
+                    value.selection_score.maximum_units,
+                    value.self_play_score.into(),
+                    value.default_anchor_score.map(Into::into),
+                ),
+            )),
+            EvaluatedIndividualData::Legacy(value) => Ok(Self::new(
+                value.individual.try_into()?,
+                Score(value.fitness_half_points),
+            )),
+        }
     }
 }
 
@@ -812,6 +915,37 @@ mod tests {
         EvolutionState::new(1, population, vec![generation], ranked[0].clone(), 4, 99).unwrap()
     }
 
+    fn anchored_state() -> EvolutionState {
+        let population: Vec<_> = (0..4)
+            .map(|id| individual(id, 0.1 + id as f64 / 10.0))
+            .collect();
+        let ranked = population
+            .iter()
+            .cloned()
+            .enumerate()
+            .map(|(index, individual)| {
+                let self_play = Score(4 - index as u32);
+                let anchor = Score(index as u32);
+                EvaluatedIndividual::with_fitness(
+                    individual,
+                    FitnessScore::new(
+                        crate::evolution::anchored_selection_score(
+                            self_play,
+                            anchor,
+                            1,
+                            DefaultAnchorConfig::new(10, 1).unwrap(),
+                        ),
+                        400,
+                        ScoreComponent::new(self_play, 4),
+                        Some(ScoreComponent::new(anchor, 4)),
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        let generation = GenerationResult::new(0, ranked.clone()).unwrap();
+        EvolutionState::new(1, population, vec![generation], ranked[0].clone(), 4, 99).unwrap()
+    }
+
     fn config() -> EvolutionConfig {
         let defaults = EvolutionConfig::default();
         EvolutionConfig::new(
@@ -841,6 +975,72 @@ mod tests {
         assert_eq!(read_checkpoint(&output, &config()).unwrap(), expected);
 
         fs::remove_file(output).unwrap();
+    }
+
+    #[test]
+    fn anchored_checkpoint_uses_auditable_score_fields_and_round_trips_components() {
+        let output = path("anchored-score-round-trip");
+        let config = config()
+            .with_default_anchor(DefaultAnchorConfig::new(10, 1).unwrap())
+            .unwrap();
+        let expected = anchored_state();
+        write_checkpoint(&output, &config, &expected).unwrap();
+        let json: serde_json::Value = serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+        let first = &json["state"]["generations"][0]["ranked"][0];
+        assert!(first.get("fitness_half_points").is_none());
+        assert_eq!(first["selection_score"]["maximum_units"], 400);
+        assert_eq!(first["self_play_score"]["available_half_points"], 4);
+        assert_eq!(first["default_anchor_score"]["available_half_points"], 4);
+        assert_eq!(read_checkpoint(&output, &config).unwrap(), expected);
+
+        let mut corrupt = json;
+        corrupt["state"]["generations"][0]["ranked"][0]["selection_score"]["units"] = 999.into();
+        fs::write(&output, serde_json::to_vec(&corrupt).unwrap()).unwrap();
+        assert!(matches!(
+            read_checkpoint(&output, &config),
+            Err(PersistenceError::CorruptData(message))
+                if message.contains("selection score")
+        ));
+        fs::remove_file(output).unwrap();
+    }
+
+    #[test]
+    fn legacy_zero_anchor_checkpoint_remains_readable_and_anchor_mismatch_is_rejected() {
+        let output = path("legacy-zero-anchor");
+        let expected = state();
+        write_checkpoint(&output, &config(), &expected).unwrap();
+        let mut json: serde_json::Value =
+            serde_json::from_slice(&fs::read(&output).unwrap()).unwrap();
+        let evolution = json["evolution_config"].as_object_mut().unwrap();
+        evolution.remove("default_anchor_weight_percent");
+        evolution.remove("default_anchor_opening_pairs");
+        json["version"] = LEGACY_PERSISTENCE_VERSION.into();
+        for ranked in json["state"]["generations"].as_array_mut().unwrap() {
+            for evaluated in ranked["ranked"].as_array_mut().unwrap() {
+                migrate_to_legacy_evaluated_json(evaluated);
+            }
+        }
+        migrate_to_legacy_evaluated_json(&mut json["state"]["best_ever"]);
+        fs::write(&output, serde_json::to_vec(&json).unwrap()).unwrap();
+        assert_eq!(read_checkpoint(&output, &config()).unwrap(), expected);
+
+        let anchored = config()
+            .with_default_anchor(DefaultAnchorConfig::new(10, 1).unwrap())
+            .unwrap();
+        assert!(matches!(
+            read_checkpoint(&output, &anchored),
+            Err(PersistenceError::IncompatibleEvolutionConfig)
+        ));
+        fs::remove_file(output).unwrap();
+    }
+
+    fn migrate_to_legacy_evaluated_json(value: &mut serde_json::Value) {
+        let object = value.as_object_mut().unwrap();
+        let units = object["selection_score"]["units"].as_u64().unwrap();
+        object.remove("selection_score");
+        object.remove("self_play_score");
+        object.remove("default_anchor_score");
+        object.insert("fitness_half_points".into(), units.into());
     }
 
     #[test]

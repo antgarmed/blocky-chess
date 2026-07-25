@@ -32,6 +32,15 @@ pub enum ProgressEvent {
         generation: usize,
         statistics: GameStatistics,
     },
+    DefaultAnchorCompleted {
+        generation: usize,
+        opening_pairs: usize,
+        games: usize,
+        candidate_half_points: u32,
+        available_half_points: u32,
+        maximum_selection_units: u32,
+        statistics: GameStatistics,
+    },
     GenerationCompleted {
         generation: usize,
         total_generations: usize,

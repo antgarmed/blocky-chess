@@ -12,7 +12,7 @@ use std::{
 
 use crate::{
     benchmark::BenchmarkConfig,
-    evolution::{EvolutionConfig, EvolutionConfigError},
+    evolution::{DefaultAnchorConfig, EvolutionConfig, EvolutionConfigError},
     experiment::ExperimentReport,
     progress::{ProgressEvent, ProgressObserver},
     training::{TrainingConfig, TrainingConfigError},
@@ -48,6 +48,8 @@ Training games:
   --opening-min-plies N                   [default: 4]
   --opening-max-plies N                   [default: 10]
   --max-opening-attempts N                [default: 100]
+  --default-anchor-weight-percent N       Integer percent in 0..=100 [default: 0]
+  --default-anchor-opening-pairs N        Pairs per individual/generation [default: 0]
 
 Champion validation:
   --candidate best-ever                   Standalone candidate [default: best-ever]
@@ -446,6 +448,21 @@ fn evolution_error(error: &EvolutionConfigError) -> String {
         EvolutionConfigError::InvalidMutationStep { name, value } => {
             format!("{name} step must be finite and greater than zero, got {value}")
         }
+        EvolutionConfigError::AnchorWeightOutOfRange(weight) => {
+            format!("default anchor weight percent must be between 0 and 100, got {weight}")
+        }
+        EvolutionConfigError::InconsistentAnchorConfiguration {
+            weight_percent,
+            opening_pairs,
+        } => format!(
+            "default anchor weight and opening pairs must either both be zero or both be positive, got {weight_percent}% and {opening_pairs} pairs"
+        ),
+        EvolutionConfigError::AnchorScoreOverflow {
+            swiss_rounds,
+            opening_pairs,
+        } => format!(
+            "default anchor dimensions are too large for exact ranking: {swiss_rounds} Swiss rounds and {opening_pairs} opening pairs"
+        ),
     }
 }
 
@@ -486,6 +503,8 @@ struct RawValues {
     opening_min_plies: usize,
     opening_max_plies: usize,
     max_opening_attempts: usize,
+    default_anchor_weight_percent: u8,
+    default_anchor_opening_pairs: usize,
     validation_depths: Vec<usize>,
     validation_openings: usize,
     validation_max_game_plies: usize,
@@ -525,6 +544,8 @@ impl Default for RawValues {
             opening_min_plies: *training.opening_plies().start(),
             opening_max_plies: *training.opening_plies().end(),
             max_opening_attempts: training.max_opening_attempts(),
+            default_anchor_weight_percent: evolution.default_anchor().weight_percent(),
+            default_anchor_opening_pairs: evolution.default_anchor().opening_pairs(),
             validation_depths: validation.search_depths().to_vec(),
             validation_openings: validation.opening_count(),
             validation_max_game_plies: validation.max_game_plies(),
@@ -589,6 +610,15 @@ impl RawValues {
             "--max-opening-attempts" => {
                 number!(max_opening_attempts, "a non-negative integer")
             }
+            "--default-anchor-weight-percent" => {
+                number!(
+                    default_anchor_weight_percent,
+                    "an integer from 0 through 100"
+                )
+            }
+            "--default-anchor-opening-pairs" => {
+                number!(default_anchor_opening_pairs, "a non-negative integer")
+            }
             "--validation-depths" => {
                 self.validation_depths = parse_depths(option, value)?;
             }
@@ -636,6 +666,11 @@ impl RawValues {
             self.max_opening_attempts,
         )
         .map_err(CliError::TrainingConfig)?;
+        let anchor = DefaultAnchorConfig::new(
+            self.default_anchor_weight_percent,
+            self.default_anchor_opening_pairs,
+        )
+        .map_err(CliError::EvolutionConfig)?;
         let evolution = EvolutionConfig::new(
             training,
             self.generations,
@@ -648,6 +683,8 @@ impl RawValues {
             self.mutation_step,
             self.strong_mutation_step,
         )
+        .map_err(CliError::EvolutionConfig)?
+        .with_default_anchor(anchor)
         .map_err(CliError::EvolutionConfig)?;
         Ok(TrainCommand {
             evolution,
@@ -726,6 +763,7 @@ pub fn render_summary(report: &ExperimentReport) -> String {
 pub struct ConsoleProgressObserver {
     generation_started: Option<(usize, Instant)>,
     generation_statistics: Option<(usize, crate::telemetry::GameStatistics, f64)>,
+    anchored_selection_maximum: Option<u32>,
 }
 
 impl ProgressObserver for ConsoleProgressObserver {
@@ -748,8 +786,42 @@ impl ProgressObserver for ConsoleProgressObserver {
                     }
                 }
             }
-            ProgressEvent::GenerationCompleted { generation, .. } => {
-                let mut line = render_progress(event);
+            ProgressEvent::DefaultAnchorCompleted {
+                generation,
+                games,
+                maximum_selection_units,
+                ..
+            } => {
+                write_stdout_line(&render_progress(event));
+                self.anchored_selection_maximum = Some(maximum_selection_units);
+                if let Some((statistics_generation, statistics, elapsed_seconds)) =
+                    self.generation_statistics.as_mut()
+                {
+                    if *statistics_generation == generation {
+                        statistics.games += games;
+                        if let Some((started_generation, started)) = self.generation_started {
+                            if started_generation == generation {
+                                *elapsed_seconds = started.elapsed().as_secs_f64();
+                            }
+                        }
+                    }
+                }
+            }
+            ProgressEvent::GenerationCompleted {
+                generation,
+                total_generations,
+                best,
+                best_score,
+            } => {
+                let mut line = match self.anchored_selection_maximum.take() {
+                    Some(maximum) => format!(
+                        "Generation {}/{total_generations} completed: best individual {}, selection {}/{maximum} units",
+                        generation + 1,
+                        best.0,
+                        best_score.0
+                    ),
+                    None => render_progress(event),
+                };
                 if let Some((statistics_generation, statistics, elapsed_seconds)) =
                     self.generation_statistics.take()
                 {
@@ -805,6 +877,21 @@ pub fn render_progress(event: ProgressEvent) -> String {
             "Generation {} self-play completed: {}",
             generation + 1,
             render_statistics(statistics)
+        ),
+        ProgressEvent::DefaultAnchorCompleted {
+            generation,
+            opening_pairs,
+            games,
+            candidate_half_points,
+            available_half_points,
+            ..
+        } => format!(
+            "Generation {}: Default anchor completed ({} pairs/individual, {} games, candidates {}/{})",
+            generation + 1,
+            opening_pairs,
+            games,
+            candidate_half_points,
+            available_half_points
         ),
         ProgressEvent::GenerationCompleted {
             generation,
@@ -1096,6 +1183,37 @@ mod tests {
             ]),
             Err(CliError::TrainingConfig(
                 TrainingConfigError::EmptyOpeningRange
+            ))
+        ));
+    }
+
+    #[test]
+    fn parses_default_anchor_and_rejects_inconsistent_combinations() {
+        let command = TrainCommand::from_args([
+            "train",
+            "--default-anchor-weight-percent",
+            "10",
+            "--default-anchor-opening-pairs",
+            "1",
+        ])
+        .unwrap();
+        let Command::Train(command) = command else {
+            panic!("expected train command");
+        };
+        assert_eq!(
+            command.evolution.default_anchor(),
+            DefaultAnchorConfig::new(10, 1).unwrap()
+        );
+        assert!(matches!(
+            TrainCommand::from_args([
+                "train",
+                "--default-anchor-weight-percent",
+                "10",
+                "--default-anchor-opening-pairs",
+                "0",
+            ]),
+            Err(CliError::EvolutionConfig(
+                EvolutionConfigError::InconsistentAnchorConfiguration { .. }
             ))
         ));
     }

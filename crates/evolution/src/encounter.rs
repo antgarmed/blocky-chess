@@ -153,6 +153,46 @@ pub struct EncounterRecord {
     pub b_score: Score,
 }
 
+#[derive(Clone, Debug)]
+pub struct ConfiguredEncounterRecord {
+    pub candidate: IndividualId,
+    pub first_game: GameRecord,
+    pub second_game: GameRecord,
+    pub candidate_score: Score,
+}
+
+fn play_configured_encounter<R: ConfiguredGameRunner>(
+    runner: &mut R,
+    candidate: IndividualId,
+    candidate_config: EvaluationConfig,
+    opening: &Opening,
+    config: &TrainingConfig,
+) -> Result<ConfiguredEncounterRecord, R::Error> {
+    let reference = EvaluationConfig::default();
+    let first_game = runner.play_configured(
+        candidate_config,
+        reference,
+        opening,
+        config.search_depth(),
+        config.max_game_plies(),
+    )?;
+    let second_game = runner.play_configured(
+        reference,
+        candidate_config,
+        opening,
+        config.search_depth(),
+        config.max_game_plies(),
+    )?;
+    let candidate_score =
+        Score(points_for_white(first_game.outcome) + points_for_black(second_game.outcome));
+    Ok(ConfiguredEncounterRecord {
+        candidate,
+        first_game,
+        second_game,
+        candidate_score,
+    })
+}
+
 pub fn play_encounter<R: GameRunner>(
     runner: &mut R,
     pairing: Pairing,
@@ -231,6 +271,15 @@ pub trait RoundExecutor {
     ) -> Result<Vec<EncounterRecord>, RoundExecutionError<Self::Error>>;
 }
 
+pub trait DefaultAnchorRoundExecutor: RoundExecutor {
+    fn play_default_anchor_round(
+        &mut self,
+        candidates: &[(IndividualId, EvaluationConfig)],
+        opening: &Opening,
+        config: &TrainingConfig,
+    ) -> Result<Vec<ConfiguredEncounterRecord>, RoundExecutionError<Self::Error>>;
+}
+
 pub struct SequentialRoundExecutor<R> {
     runner: R,
 }
@@ -256,6 +305,26 @@ impl<R: GameRunner> RoundExecutor for SequentialRoundExecutor<R> {
         config: &TrainingConfig,
     ) -> Result<Vec<EncounterRecord>, RoundExecutionError<Self::Error>> {
         play_round(&mut self.runner, round, population, opening, config)
+    }
+}
+
+impl<R> DefaultAnchorRoundExecutor for SequentialRoundExecutor<R>
+where
+    R: GameRunner + ConfiguredGameRunner<Error = <R as GameRunner>::Error>,
+{
+    fn play_default_anchor_round(
+        &mut self,
+        candidates: &[(IndividualId, EvaluationConfig)],
+        opening: &Opening,
+        config: &TrainingConfig,
+    ) -> Result<Vec<ConfiguredEncounterRecord>, RoundExecutionError<Self::Error>> {
+        candidates
+            .iter()
+            .map(|(id, candidate)| {
+                play_configured_encounter(&mut self.runner, *id, *candidate, opening, config)
+                    .map_err(RoundExecutionError::Game)
+            })
+            .collect()
     }
 }
 
@@ -350,6 +419,80 @@ where
             .map(|result| {
                 result
                     .expect("every dispatched pairing must produce one result")
+                    .map_err(RoundExecutionError::Game)
+            })
+            .collect()
+    }
+}
+
+impl<F> DefaultAnchorRoundExecutor for ParallelRoundExecutor<F>
+where
+    F: GameRunnerFactory
+        + ConfiguredGameRunnerFactory<Runner = <F as GameRunnerFactory>::Runner>
+        + Sync,
+    <F as GameRunnerFactory>::Runner: Send
+        + ConfiguredGameRunner<Error = <<F as GameRunnerFactory>::Runner as GameRunner>::Error>,
+    <<F as GameRunnerFactory>::Runner as GameRunner>::Error: Send,
+{
+    fn play_default_anchor_round(
+        &mut self,
+        candidates: &[(IndividualId, EvaluationConfig)],
+        opening: &Opening,
+        config: &TrainingConfig,
+    ) -> Result<Vec<ConfiguredEncounterRecord>, RoundExecutionError<Self::Error>> {
+        let worker_count = self.workers.get().min(candidates.len());
+        if worker_count <= 1 {
+            let mut runner = GameRunnerFactory::create(&self.factory);
+            return candidates
+                .iter()
+                .map(|(id, candidate)| {
+                    play_configured_encounter(&mut runner, *id, *candidate, opening, config)
+                        .map_err(RoundExecutionError::Game)
+                })
+                .collect();
+        }
+        let factory = &self.factory;
+        let worker_results = std::thread::scope(|scope| {
+            (0..worker_count)
+                .map(|worker| {
+                    scope.spawn(move || {
+                        let mut runner = GameRunnerFactory::create(factory);
+                        candidates
+                            .iter()
+                            .enumerate()
+                            .skip(worker)
+                            .step_by(worker_count)
+                            .map(|(index, (id, candidate))| {
+                                (
+                                    index,
+                                    play_configured_encounter(
+                                        &mut runner,
+                                        *id,
+                                        *candidate,
+                                        opening,
+                                        config,
+                                    ),
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|handle| handle.join())
+                .collect::<Vec<_>>()
+        });
+        let mut ordered = (0..candidates.len()).map(|_| None).collect::<Vec<_>>();
+        for worker_result in worker_results {
+            for (index, result) in worker_result.map_err(|_| RoundExecutionError::WorkerPanic)? {
+                ordered[index] = Some(result);
+            }
+        }
+        ordered
+            .into_iter()
+            .map(|result| {
+                result
+                    .expect("every anchor candidate must produce one result")
                     .map_err(RoundExecutionError::Game)
             })
             .collect()
