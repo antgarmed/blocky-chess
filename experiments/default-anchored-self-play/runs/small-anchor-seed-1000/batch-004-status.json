@@ -1,0 +1,12 @@
+﻿{
+    "batch":  4,
+    "state":  "completed",
+    "reason":  "training_complete",
+    "process_id":  22224,
+    "started_at_utc":  "2026-07-25T12:35:37.0164181Z",
+    "ended_at_utc":  "2026-07-25T13:07:51.0616264Z",
+    "elapsed_seconds":  1934.045,
+    "checkpoint_next_generation":  100,
+    "stdout_log":  "batch-004-stdout.log",
+    "stderr_log":  "batch-004-stderr.log"
+}
