@@ -1,0 +1,13 @@
+{
+  "git_revision": "9dcaea701e2664d94eb1e210d6504019d57aef95",
+  "git_worktree_before_run": "clean",
+  "build_profile": "release",
+  "rustc": "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+  "cargo": "cargo 1.97.1 (c980f4866 2026-06-30)",
+  "workers": 16,
+  "cpu": "13th Gen Intel(R) Core(TM) i9-13900HX (2.20 GHz)",
+  "ram": "32.0 GB (31.7 GB usable)",
+  "started_at_utc": "2026-07-25T10:24:33.9075505Z",
+  "ended_at_utc": "2026-07-25T10:25:56.7813225Z",
+  "elapsed_seconds": 82.874
+}
