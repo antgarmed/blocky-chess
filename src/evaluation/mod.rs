@@ -19,6 +19,32 @@ pub struct EvaluationConfig {
     pub king_safety_weight: Value,
 }
 
+impl EvaluationConfig {
+    pub(crate) fn from_normalized_genes(genes: [f64; 12]) -> Option<Self> {
+        if genes.iter().any(|gene| !gene.is_finite() || *gene < 0.0)
+            || genes.iter().all(|gene| *gene == 0.0)
+        {
+            return None;
+        }
+        let quantize = |gene: f64| (gene * 4_000.0).round() as Value;
+        Some(Self {
+            pawn_value: quantize(genes[0]),
+            knight_value: quantize(genes[1]),
+            bishop_value: quantize(genes[2]),
+            rook_value: quantize(genes[3]),
+            queen_value: quantize(genes[4]),
+            mobility_weight: 100,
+            pawn_mobility_weight: quantize(genes[5]),
+            knight_mobility_weight: quantize(genes[6]),
+            bishop_mobility_weight: quantize(genes[7]),
+            rook_mobility_weight: quantize(genes[8]),
+            queen_mobility_weight: quantize(genes[9]),
+            king_mobility_weight: quantize(genes[10]),
+            king_safety_weight: quantize(genes[11]),
+        })
+    }
+}
+
 impl Default for EvaluationConfig {
     fn default() -> Self {
         Self {

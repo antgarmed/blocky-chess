@@ -1,5 +1,6 @@
 use crate::engine::Engine;
 use crate::evaluation::{main_evaluation::main_evaluation, EvaluationConfig};
+use crate::evolution_profile::load_individual;
 use crate::movegen::basic_movegen::basic_movegen;
 use crate::search::alpha_beta_iterative_deepening::AlphaBetaIterativeDeepeningSearch;
 use crate::search::{SearchConfig, SearchLimits, SearchResult};
@@ -41,6 +42,8 @@ where
 {
     let mut engine = get_engine();
     let mut evaluation_config = EvaluationConfig::default();
+    let mut evolution_checkpoint: Option<String> = None;
+    let mut evolution_individual_id: Option<u64> = None;
     let mut active_search: Option<ActiveSearch> = None;
 
     for line in reader.lines() {
@@ -75,11 +78,29 @@ where
             }
             UciMessage::SetOption { name, value } => {
                 stop_active(&mut active_search);
-                if apply_evaluation_option(&name, value.as_deref(), &mut evaluation_config) {
+                if name.eq_ignore_ascii_case("EvolutionCheckpoint") {
+                    evolution_checkpoint = value;
+                } else if name.eq_ignore_ascii_case("EvolutionIndividualId") {
+                    evolution_individual_id = value.and_then(|v| v.parse().ok());
+                } else if apply_evaluation_option(&name, value.as_deref(), &mut evaluation_config) {
                     engine.set_evaluation_config(evaluation_config);
                 }
             }
-            UciMessage::IsReady => write_line(&output, UciMessage::ReadyOk)?,
+            UciMessage::IsReady => {
+                if let (Some(path), Some(id)) = (&evolution_checkpoint, evolution_individual_id) {
+                    match load_individual(path, id) {
+                        Ok(config) => {
+                            evaluation_config = config;
+                            engine.set_evaluation_config(config);
+                        }
+                        Err(error) => write_line(
+                            &output,
+                            format!("info string error loading individual {id}: {error}"),
+                        )?,
+                    }
+                }
+                write_line(&output, UciMessage::ReadyOk)?
+            }
             UciMessage::Stop => stop_active(&mut active_search),
             UciMessage::UciNewGame => stop_active(&mut active_search),
             UciMessage::Position {
@@ -145,7 +166,7 @@ fn get_engine() -> Engine {
     )))
 }
 
-fn evaluation_options(config: &EvaluationConfig) -> [UciOptionConfig; 13] {
+fn evaluation_options(config: &EvaluationConfig) -> [UciOptionConfig; 15] {
     [
         material_option("PawnValue", config.pawn_value),
         material_option("KnightValue", config.knight_value),
@@ -160,6 +181,16 @@ fn evaluation_options(config: &EvaluationConfig) -> [UciOptionConfig; 13] {
         spin_option("QueenMobilityWeight", config.queen_mobility_weight),
         spin_option("KingMobilityWeight", config.king_mobility_weight),
         spin_option("KingSafetyWeight", config.king_safety_weight),
+        UciOptionConfig::String {
+            name: "EvolutionCheckpoint".to_owned(),
+            default: None,
+        },
+        UciOptionConfig::Spin {
+            name: "EvolutionIndividualId".to_owned(),
+            default: Some(0),
+            min: Some(0),
+            max: Some(2_147_483_647),
+        },
     ]
 }
 
@@ -415,10 +446,10 @@ mod tests {
         run_uci(Cursor::new("uci\nisready\nquit\n"), Arc::clone(&output)).unwrap();
         let output = output.lock().unwrap();
 
-        assert_eq!(output.flushes, 17);
+        assert_eq!(output.flushes, 19);
         assert_eq!(
             String::from_utf8(output.bytes.clone()).unwrap(),
-            "id name Blocky 0.1.0\nid author antgarmed\noption name PawnValue type spin default 100 min 0 max 1000\noption name KnightValue type spin default 300 min 0 max 1000\noption name BishopValue type spin default 300 min 0 max 1000\noption name RookValue type spin default 500 min 0 max 1000\noption name QueenValue type spin default 900 min 0 max 1000\noption name MobilityWeight type spin default 10 min 0 max 100\noption name PawnMobilityWeight type spin default 5 min 0 max 100\noption name KnightMobilityWeight type spin default 30 min 0 max 100\noption name BishopMobilityWeight type spin default 30 min 0 max 100\noption name RookMobilityWeight type spin default 20 min 0 max 100\noption name QueenMobilityWeight type spin default 10 min 0 max 100\noption name KingMobilityWeight type spin default 5 min 0 max 100\noption name KingSafetyWeight type spin default 50 min 0 max 100\nuciok\nreadyok\n"
+            "id name Blocky 0.1.0\nid author antgarmed\noption name PawnValue type spin default 100 min 0 max 1000\noption name KnightValue type spin default 300 min 0 max 1000\noption name BishopValue type spin default 300 min 0 max 1000\noption name RookValue type spin default 500 min 0 max 1000\noption name QueenValue type spin default 900 min 0 max 1000\noption name MobilityWeight type spin default 10 min 0 max 100\noption name PawnMobilityWeight type spin default 5 min 0 max 100\noption name KnightMobilityWeight type spin default 30 min 0 max 100\noption name BishopMobilityWeight type spin default 30 min 0 max 100\noption name RookMobilityWeight type spin default 20 min 0 max 100\noption name QueenMobilityWeight type spin default 10 min 0 max 100\noption name KingMobilityWeight type spin default 5 min 0 max 100\noption name KingSafetyWeight type spin default 50 min 0 max 100\noption name EvolutionCheckpoint type string\noption name EvolutionIndividualId type spin default 0 min 0 max 2147483647\nuciok\nreadyok\n"
         );
     }
 

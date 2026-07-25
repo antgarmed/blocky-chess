@@ -2,6 +2,7 @@
 
 pub mod engine;
 pub mod evaluation;
+pub mod evolution_profile;
 pub mod movegen;
 pub mod search;
 pub mod uci;
