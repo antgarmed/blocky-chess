@@ -62,6 +62,7 @@ The first study is a controlled comparison of three anchor weights:
 | Control | 1.00 | 0.00 | 0 |
 | Small anchor | 0.90 | 0.10 | 1 |
 | Moderate anchor | 0.80 | 0.20 | 2 |
+| Disruptive pilot | 0.70 | 0.30 | 3 |
 
 The control condition reproduces the zero-knowledge training objective in the
 same code revision used for the comparison. Existing seed-1000 results are
@@ -220,7 +221,23 @@ exploratory.
 
 The complete results and paired interpretation are recorded in
 [`runs/small-anchor-seed-1000/DEVELOPMENT-BENCHMARKS.md`](runs/small-anchor-seed-1000/DEVELOPMENT-BENCHMARKS.md).
-The next predefined development condition is the moderate 20% anchor.
+
+The next predefined development condition was the moderate 20% anchor. A
+stronger 30% condition is registered separately as a disruptive pilot with an
+explicit generation-50 decision gate; it must not be conflated with the
+moderate condition or with a completed 100-generation result.
+
+### 8.2 Disruptive 30% pilot
+
+The disruptive pilot uses training seed `1000`, a 30% Default anchor, and
+three opening pairs per individual and generation. It retains the frozen
+100-generation objective for checkpoint compatibility, but the first tanda
+stops at a valid generation-50 checkpoint. The generation-50 snapshot is
+benchmarked against `Default` and the fixed `RandomGenome` ensemble before a
+decision is made about resuming to generation 100.
+
+The run plan is recorded in
+[`runs/disruptive-30pct-seed-1000/EXPERIMENT.md`](runs/disruptive-30pct-seed-1000/EXPERIMENT.md).
 
 ## 9. Validation Strategy
 

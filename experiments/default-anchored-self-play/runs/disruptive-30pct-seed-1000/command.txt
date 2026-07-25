@@ -1,0 +1,6 @@
+run-batch.ps1 -BatchNumber 1 -DurationSeconds 3600 -StopGeneration 50
+
+The controller launches the release engine with --generations 100 for
+checkpoint compatibility and stops after the first valid checkpoint at or
+beyond generation 50. The anchored training arguments are
+--default-anchor-weight-percent 30 --default-anchor-opening-pairs 3.

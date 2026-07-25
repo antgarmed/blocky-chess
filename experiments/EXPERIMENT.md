@@ -9,7 +9,7 @@ original protocol.
 | Experiment | Training signal | Status |
 | --- | --- | --- |
 | [`zero-knowledge-self-play`](zero-knowledge-self-play/EXPERIMENT.md) | Contemporary self-play only | Original protocol; seed 1000 completed |
-| [`default-anchored-self-play`](default-anchored-self-play/EXPERIMENT.md) | Contemporary self-play plus a small `Default` anchor | Small-anchor seed 1000 development run completed |
+| [`default-anchored-self-play`](default-anchored-self-play/EXPERIMENT.md) | Contemporary self-play plus a `Default` anchor | Small-anchor seed 1000 completed; disruptive 30% pilot established |
 
 The original experiment and all of its artifacts remain authoritative for the
 zero-knowledge condition. Results from the anchored experiment must not be
