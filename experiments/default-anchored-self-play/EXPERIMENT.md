@@ -204,6 +204,24 @@ It must use development seeds distinct from every final validation seed.
 `RandomLegal` is excluded from training and primary analysis because the
 zero-knowledge candidates already saturated that competence floor.
 
+### 8.1 Small-anchor seed-1000 result
+
+The 10% condition completed 100 generations for training seed `1000`.
+Development comparisons used the same fixed Default openings, RandomLegal
+openings, RandomGenome ensemble, and seeds as the zero-knowledge seed-1000
+run.
+
+The small anchor did not improve the mean Default score across generations
+`1`, `25`, `50`, `75`, and `100`: both conditions averaged `21.00%`. The
+anchored champion scored `22.50%` against Default versus `16.25%` for the
+zero-knowledge champion, while retaining comparable RandomGenome performance.
+The small benchmark and single training seed make that champion difference
+exploratory.
+
+The complete results and paired interpretation are recorded in
+[`runs/small-anchor-seed-1000/DEVELOPMENT-BENCHMARKS.md`](runs/small-anchor-seed-1000/DEVELOPMENT-BENCHMARKS.md).
+The next predefined development condition is the moderate 20% anchor.
+
 ## 9. Validation Strategy
 
 Training against `Default` changes its scientific role. Performance against
