@@ -1,0 +1,13 @@
+{
+  "batch": 2,
+  "state": "interrupted",
+  "reason": "process_disappeared_without_controller_status",
+  "controller_process_id": 37548,
+  "engine_process_id": 24556,
+  "started_at_utc": "2026-07-25T11:45:02.4915775Z",
+  "last_checkpoint_at_utc": "2026-07-25T12:06:01.3723003Z",
+  "observed_elapsed_seconds": 1258.881,
+  "checkpoint_next_generation": 64,
+  "stdout_log": "batch-002-stdout.log",
+  "stderr_log": "batch-002-stderr.log"
+}
