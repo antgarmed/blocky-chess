@@ -295,10 +295,11 @@ Swiss fitness values from different generations are not directly comparable.
 Each generation can use different opponents and openings, so an increase in
 the best recorded Swiss score does not by itself demonstrate convergence.
 
-If convergence is studied, select the best individual from generations:
+If convergence is studied, select the best individual from the following
+human-numbered generations:
 
 ```text
-0, 25, 50, 75, 99
+1, 25, 50, 75, 100
 ```
 
 Evaluate these snapshots against the same small development benchmark. This
@@ -307,10 +308,11 @@ validation is exploratory and must not influence which individual is declared
 the run's champion; the best-ever training individual remains the champion
 selected by the implemented algorithm.
 
-The standalone `validate --generation N` interface uses human, one-based
-generation numbers (`N = 1` maps to stored history index `0`). Omitting the
-option selects `best-ever`. Its JSON output is a separate, versioned validation
-document rather than a complete training experiment report.
+The standalone `validate --generation N` interface uses the same human,
+one-based generation numbers (`N = 1` maps to stored history index `0`).
+Omitting the option selects `best-ever`. Its JSON output is a separate,
+versioned validation document rather than a complete training experiment
+report.
 
 ## 13. Random-Search Control Experiment
 
