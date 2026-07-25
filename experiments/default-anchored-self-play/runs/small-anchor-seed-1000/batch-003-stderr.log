@@ -1,0 +1,1 @@
+error: training failed: checkpoint failed: could not prepare replacement of C:\Users\antga\Desarrollo\Rust\blocky-chess\experiments\default-anchored-self-play\runs\small-anchor-seed-1000\checkpoint.json: El proceso no tiene acceso al archivo porque está siendo utilizado por otro proceso. (os error 32)

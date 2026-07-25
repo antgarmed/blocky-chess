@@ -1,0 +1,12 @@
+﻿{
+    "batch":  3,
+    "state":  "failed",
+    "reason":  "process_exited",
+    "process_id":  32972,
+    "started_at_utc":  "2026-07-25T12:20:56.7048211Z",
+    "ended_at_utc":  "2026-07-25T12:28:51.0203377Z",
+    "elapsed_seconds":  474.316,
+    "checkpoint_next_generation":  69,
+    "stdout_log":  "batch-003-stdout.log",
+    "stderr_log":  "batch-003-stderr.log"
+}
