@@ -2583,7 +2583,7 @@ mod tests {
                 .archive()
                 .entries()
                 .len(),
-            2
+            1
         );
 
         let resumed_seen = Rc::new(RefCell::new(vec![]));

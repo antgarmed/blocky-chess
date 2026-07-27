@@ -121,6 +121,14 @@ impl HistoricalArchive {
         if !config.enabled() || !(generation + 1).is_multiple_of(config.insertion_cadence()) {
             return;
         }
+        let fingerprint = phenotype_fingerprint(champion.individual().genome());
+        if self
+            .entries
+            .iter()
+            .any(|entry| phenotype_fingerprint(entry.champion().genome()) == fingerprint)
+        {
+            return;
+        }
         self.entries
             .push(ArchiveEntry::new(generation, champion.individual().clone()));
         while self.entries.len() > config.maximum_size() {
@@ -251,5 +259,59 @@ mod tests {
         .unwrap();
         assert_ne!(a, b);
         assert_eq!(phenotype_fingerprint(&a), phenotype_fingerprint(&b));
+    }
+
+    #[test]
+    fn repeated_champion_is_kept_only_once_at_its_oldest_generation() {
+        let config = HistoricalConfig::new(30, 2, 1, 1, 8).unwrap();
+        let champion = evaluated(0);
+        let mut archive = HistoricalArchive::default();
+        archive.insert_champion(0, &champion, config);
+        archive.insert_champion(1, &champion, config);
+        assert_eq!(archive.entries().len(), 1);
+        assert_eq!(archive.entries()[0].generation(), 0);
+    }
+
+    #[test]
+    fn distinct_genomes_with_the_same_quantized_phenotype_are_deduplicated() {
+        let config = HistoricalConfig::new(30, 2, 1, 1, 8).unwrap();
+        let a = evaluated(0);
+        let mut genes = *a.individual().genome().genes();
+        genes[1] += 0.000001;
+        let b = EvaluatedIndividual::with_fitness(
+            Individual::new(IndividualId(99), Genome::new(genes).unwrap()),
+            FitnessScore::legacy(Score(0)),
+        );
+        assert_ne!(a.individual().genome(), b.individual().genome());
+        assert_eq!(
+            phenotype_fingerprint(a.individual().genome()),
+            phenotype_fingerprint(b.individual().genome())
+        );
+        let mut archive = HistoricalArchive::default();
+        archive.insert_champion(3, &a, config);
+        archive.insert_champion(4, &b, config);
+        assert_eq!(archive.entries().len(), 1);
+        assert_eq!(archive.entries()[0].champion().id(), a.individual().id());
+    }
+
+    #[test]
+    fn genuinely_distinct_phenotypes_remain_insertable() {
+        let config = HistoricalConfig::new(30, 2, 1, 1, 8).unwrap();
+        let mut archive = HistoricalArchive::default();
+        archive.insert_champion(0, &evaluated(0), config);
+        archive.insert_champion(1, &evaluated(1), config);
+        assert_eq!(archive.entries().len(), 2);
+    }
+
+    #[test]
+    fn bounded_retention_still_applies_after_phenotype_deduplication() {
+        let config = HistoricalConfig::new(30, 2, 1, 1, 2).unwrap();
+        let mut archive = HistoricalArchive::default();
+        for generation in 0..12 {
+            archive.insert_champion(generation, &evaluated(generation), config);
+        }
+        assert_eq!(archive.entries().len(), 2);
+        assert_eq!(archive.entries().first().unwrap().generation(), 0);
+        assert_eq!(archive.entries().last().unwrap().generation(), 11);
     }
 }
