@@ -9,6 +9,7 @@ pub mod encounter;
 pub mod evolution;
 pub mod experiment;
 pub mod genome;
+pub mod historical;
 pub mod openings;
 pub mod pairing;
 pub mod persistence;

@@ -14,11 +14,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     evolution::{
-        DefaultAnchorConfig, EvaluatedIndividual, EvolutionConfig, EvolutionState,
-        EvolutionStateError, FitnessScore, GenerationResult, Individual, ScoreComponent,
+        historical_selection_score, DefaultAnchorConfig, EvaluatedIndividual, EvolutionConfig,
+        EvolutionState, EvolutionStateError, FitnessScore, GenerationResult, Individual,
+        ScoreComponent,
     },
     experiment::ExperimentReport,
     genome::{Genome, GENE_COUNT},
+    historical::{ArchiveEntry, HistoricalArchive, HistoricalAudit, HistoricalConfig},
     pairing::{IndividualId, Score},
     self_play::{DrawReason, GameOutcome},
     telemetry::{GameObservation, GameStatistics},
@@ -27,8 +29,9 @@ use crate::{
 };
 
 pub const PERSISTENCE_FORMAT: &str = "blocky-evolution";
-pub const PERSISTENCE_VERSION: u32 = 2;
+pub const PERSISTENCE_VERSION: u32 = 3;
 const LEGACY_PERSISTENCE_VERSION: u32 = 1;
+const ANCHORED_PERSISTENCE_VERSION: u32 = 2;
 const WINDOWS_SHARING_RETRY_ATTEMPTS: usize = 21;
 const WINDOWS_SHARING_RETRY_DELAY: Duration = Duration::from_millis(100);
 
@@ -145,6 +148,30 @@ fn validate_checkpoint_state(
             "completed generations exceed configured target".into(),
         ));
     }
+    if !config.historical().enabled() && !state.archive().entries().is_empty() {
+        return Err(PersistenceError::CorruptData(
+            "disabled historical league contains archive entries".into(),
+        ));
+    }
+    if state.archive().entries().len() > config.historical().maximum_size() {
+        return Err(PersistenceError::CorruptData(
+            "historical archive exceeds configured maximum size".into(),
+        ));
+    }
+    for entry in state.archive().entries() {
+        let expected = state
+            .generations()
+            .get(entry.generation())
+            .filter(|_| {
+                (entry.generation() + 1).is_multiple_of(config.historical().insertion_cadence())
+            })
+            .map(GenerationResult::best);
+        if expected.map(EvaluatedIndividual::individual) != Some(entry.champion()) {
+            return Err(PersistenceError::CorruptData(
+                "historical archive entry is not its generation champion".into(),
+            ));
+        }
+    }
     for evaluated in state
         .generations()
         .iter()
@@ -160,8 +187,17 @@ fn validate_checkpoint_state(
             }
             continue;
         }
-        let reconstructed =
-            fitness.reconstruct_selection_units(config.swiss_rounds(), config.default_anchor());
+        let reconstructed = if let Some(historical) = fitness.historical() {
+            Some(historical_selection_score(
+                fitness.self_play().half_points(),
+                historical.half_points(),
+                fitness.self_play().available_half_points(),
+                historical.available_half_points(),
+                config.historical().weight_percent(),
+            ))
+        } else {
+            fitness.reconstruct_selection_units(config.swiss_rounds(), config.default_anchor())
+        };
         if reconstructed != Some(fitness.selection_units()) {
             return Err(PersistenceError::CorruptData(
                 "selection score does not match its persisted components".into(),
@@ -231,7 +267,10 @@ fn verify_header(format: &str, version: u32) -> Result<(), PersistenceError> {
     if format != PERSISTENCE_FORMAT {
         return Err(PersistenceError::WrongFormat(format.to_owned()));
     }
-    if version != PERSISTENCE_VERSION && version != LEGACY_PERSISTENCE_VERSION {
+    if version != PERSISTENCE_VERSION
+        && version != ANCHORED_PERSISTENCE_VERSION
+        && version != LEGACY_PERSISTENCE_VERSION
+    {
         return Err(PersistenceError::UnsupportedVersion(version));
     }
     Ok(())
@@ -401,6 +440,16 @@ struct EvolutionConfigData {
     default_anchor_weight_percent: u8,
     #[serde(default)]
     default_anchor_opening_pairs: usize,
+    #[serde(default)]
+    historical_weight_percent: u8,
+    #[serde(default)]
+    historical_opponents: usize,
+    #[serde(default)]
+    historical_opening_pairs: usize,
+    #[serde(default)]
+    historical_insertion_cadence: usize,
+    #[serde(default)]
+    historical_maximum_size: usize,
 }
 
 impl From<&EvolutionConfig> for EvolutionConfigData {
@@ -418,6 +467,11 @@ impl From<&EvolutionConfig> for EvolutionConfigData {
             strong_mutation_step: config.strong_mutation_step(),
             default_anchor_weight_percent: config.default_anchor().weight_percent(),
             default_anchor_opening_pairs: config.default_anchor().opening_pairs(),
+            historical_weight_percent: config.historical().weight_percent(),
+            historical_opponents: config.historical().opponents(),
+            historical_opening_pairs: config.historical().opening_pairs(),
+            historical_insertion_cadence: config.historical().insertion_cadence(),
+            historical_maximum_size: config.historical().maximum_size(),
         }
     }
 }
@@ -443,6 +497,16 @@ impl TryFrom<EvolutionConfigData> for EvolutionConfig {
         .map_err(|error| {
             PersistenceError::CorruptData(format!("invalid default anchor config: {error}"))
         })?;
+        let historical = HistoricalConfig::new(
+            value.historical_weight_percent,
+            value.historical_opponents,
+            value.historical_opening_pairs,
+            value.historical_insertion_cadence,
+            value.historical_maximum_size,
+        )
+        .map_err(|error| {
+            PersistenceError::CorruptData(format!("invalid historical config: {error:?}"))
+        })?;
         EvolutionConfig::new(
             training,
             value.generations,
@@ -461,6 +525,10 @@ impl TryFrom<EvolutionConfigData> for EvolutionConfig {
         .with_default_anchor(anchor)
         .map_err(|error| {
             PersistenceError::CorruptData(format!("invalid default anchor config: {error}"))
+        })?
+        .with_historical(historical)
+        .map_err(|error| {
+            PersistenceError::CorruptData(format!("invalid historical config: {error}"))
         })
     }
 }
@@ -520,6 +588,8 @@ struct CurrentEvaluatedIndividualData {
     selection_score: SelectionScoreData,
     self_play_score: ScoreComponentData,
     default_anchor_score: Option<ScoreComponentData>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    historical_score: Option<ScoreComponentData>,
 }
 
 #[derive(Serialize, Deserialize)]
@@ -554,6 +624,7 @@ impl From<&EvaluatedIndividual> for EvaluatedIndividualData {
             },
             self_play_score: ScoreComponentData::from(fitness.self_play()),
             default_anchor_score: fitness.default_anchor().map(ScoreComponentData::from),
+            historical_score: fitness.historical().map(ScoreComponentData::from),
         })
     }
 }
@@ -578,15 +649,24 @@ impl TryFrom<EvaluatedIndividualData> for EvaluatedIndividual {
 
     fn try_from(value: EvaluatedIndividualData) -> Result<Self, Self::Error> {
         match value {
-            EvaluatedIndividualData::Current(value) => Ok(Self::with_fitness(
-                value.individual.try_into()?,
-                FitnessScore::new(
-                    Score(value.selection_score.units),
-                    value.selection_score.maximum_units,
-                    value.self_play_score.into(),
-                    value.default_anchor_score.map(Into::into),
-                ),
-            )),
+            EvaluatedIndividualData::Current(value) => {
+                let fitness = if let Some(historical) = value.historical_score {
+                    FitnessScore::with_historical(
+                        Score(value.selection_score.units),
+                        value.selection_score.maximum_units,
+                        value.self_play_score.into(),
+                        historical.into(),
+                    )
+                } else {
+                    FitnessScore::new(
+                        Score(value.selection_score.units),
+                        value.selection_score.maximum_units,
+                        value.self_play_score.into(),
+                        value.default_anchor_score.map(Into::into),
+                    )
+                };
+                Ok(Self::with_fitness(value.individual.try_into()?, fitness))
+            }
             EvaluatedIndividualData::Legacy(value) => Ok(Self::new(
                 value.individual.try_into()?,
                 Score(value.fitness_half_points),
@@ -600,6 +680,72 @@ impl TryFrom<EvaluatedIndividualData> for EvaluatedIndividual {
 struct GenerationData {
     index: usize,
     ranked: Vec<EvaluatedIndividualData>,
+    #[serde(default)]
+    historical_audit: HistoricalAuditData,
+}
+
+#[derive(Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct HistoricalAuditData {
+    opponent_generations: Vec<usize>,
+    opponent_ids: Vec<u64>,
+    opening_ids: Vec<u64>,
+    distinct_phenotypes: usize,
+    archive_size_before: usize,
+    archive_size_after: usize,
+}
+
+impl From<&HistoricalAudit> for HistoricalAuditData {
+    fn from(value: &HistoricalAudit) -> Self {
+        Self {
+            opponent_generations: value.opponent_generations.clone(),
+            opponent_ids: value.opponent_ids.iter().map(|id| id.0).collect(),
+            opening_ids: value.opening_ids.iter().map(|id| id.0).collect(),
+            distinct_phenotypes: value.distinct_phenotypes,
+            archive_size_before: value.archive_size_before,
+            archive_size_after: value.archive_size_after,
+        }
+    }
+}
+
+impl From<HistoricalAuditData> for HistoricalAudit {
+    fn from(value: HistoricalAuditData) -> Self {
+        Self {
+            opponent_generations: value.opponent_generations,
+            opponent_ids: value.opponent_ids.into_iter().map(IndividualId).collect(),
+            opening_ids: value
+                .opening_ids
+                .into_iter()
+                .map(crate::openings::OpeningId)
+                .collect(),
+            distinct_phenotypes: value.distinct_phenotypes,
+            archive_size_before: value.archive_size_before,
+            archive_size_after: value.archive_size_after,
+        }
+    }
+}
+
+#[derive(Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ArchiveEntryData {
+    generation: usize,
+    champion: IndividualData,
+}
+
+impl From<&ArchiveEntry> for ArchiveEntryData {
+    fn from(value: &ArchiveEntry) -> Self {
+        Self {
+            generation: value.generation(),
+            champion: IndividualData::from(value.champion()),
+        }
+    }
+}
+
+impl TryFrom<ArchiveEntryData> for ArchiveEntry {
+    type Error = PersistenceError;
+    fn try_from(value: ArchiveEntryData) -> Result<Self, Self::Error> {
+        Ok(Self::new(value.generation, value.champion.try_into()?))
+    }
 }
 
 impl From<&GenerationResult> for GenerationData {
@@ -611,6 +757,7 @@ impl From<&GenerationResult> for GenerationData {
                 .iter()
                 .map(EvaluatedIndividualData::from)
                 .collect(),
+            historical_audit: HistoricalAuditData::from(value.historical_audit()),
         }
     }
 }
@@ -619,7 +766,7 @@ impl TryFrom<GenerationData> for GenerationResult {
     type Error = PersistenceError;
 
     fn try_from(value: GenerationData) -> Result<Self, Self::Error> {
-        GenerationResult::new(
+        let mut result = GenerationResult::new(
             value.index,
             value
                 .ranked
@@ -627,7 +774,9 @@ impl TryFrom<GenerationData> for GenerationResult {
                 .map(TryInto::try_into)
                 .collect::<Result<_, _>>()?,
         )
-        .map_err(state_error)
+        .map_err(state_error)?;
+        result.historical_audit = value.historical_audit.into();
+        Ok(result)
     }
 }
 
@@ -640,6 +789,8 @@ struct EvolutionStateData {
     best_ever: EvaluatedIndividualData,
     next_id: u64,
     rng_state: u64,
+    #[serde(default)]
+    archive: Vec<ArchiveEntryData>,
 }
 
 impl From<&EvolutionState> for EvolutionStateData {
@@ -659,6 +810,12 @@ impl From<&EvolutionState> for EvolutionStateData {
             best_ever: EvaluatedIndividualData::from(value.best_ever()),
             next_id: value.next_id(),
             rng_state: value.rng_state(),
+            archive: value
+                .archive()
+                .entries()
+                .iter()
+                .map(ArchiveEntryData::from)
+                .collect(),
         }
     }
 }
@@ -667,7 +824,15 @@ impl TryFrom<EvolutionStateData> for EvolutionState {
     type Error = PersistenceError;
 
     fn try_from(value: EvolutionStateData) -> Result<Self, Self::Error> {
-        EvolutionState::new(
+        let archive = HistoricalArchive::from_entries(
+            value
+                .archive
+                .into_iter()
+                .map(TryInto::try_into)
+                .collect::<Result<_, _>>()?,
+        )
+        .map_err(|reason| PersistenceError::CorruptData(reason.into()))?;
+        EvolutionState::new_with_archive(
             value.next_generation,
             value
                 .population
@@ -682,6 +847,7 @@ impl TryFrom<EvolutionStateData> for EvolutionState {
             value.best_ever.try_into()?,
             value.next_id,
             value.rng_state,
+            archive,
         )
         .map_err(state_error)
     }
@@ -1011,6 +1177,58 @@ mod tests {
         assert_eq!(json["version"], PERSISTENCE_VERSION);
         assert_eq!(read_checkpoint(&output, &config()).unwrap(), expected);
 
+        fs::remove_file(output).unwrap();
+    }
+
+    #[test]
+    fn historical_checkpoint_round_trip_preserves_archive_scores_and_audit() {
+        let output = path("historical-checkpoint-round-trip");
+        let historical = HistoricalConfig::new(30, 1, 1, 1, 4).unwrap();
+        let config = config().with_historical(historical).unwrap();
+        let population: Vec<_> = (0..4)
+            .map(|id| individual(id, 0.1 + id as f64 / 10.0))
+            .collect();
+        let ranked = population
+            .iter()
+            .cloned()
+            .map(|individual| {
+                EvaluatedIndividual::with_fitness(
+                    individual,
+                    FitnessScore::with_historical(
+                        crate::evolution::historical_selection_score(Score(2), Score(2), 4, 4, 30),
+                        10_000,
+                        ScoreComponent::new(Score(2), 4),
+                        ScoreComponent::new(Score(2), 4),
+                    ),
+                )
+            })
+            .collect::<Vec<_>>();
+        let mut generation = GenerationResult::new(0, ranked.clone()).unwrap();
+        generation.historical_audit = HistoricalAudit {
+            opponent_generations: vec![0],
+            opponent_ids: vec![IndividualId(42)],
+            opening_ids: vec![crate::openings::OpeningId(7)],
+            distinct_phenotypes: 4,
+            archive_size_before: 0,
+            archive_size_after: 1,
+        };
+        let archive = HistoricalArchive::from_entries(vec![ArchiveEntry::new(
+            0,
+            ranked[0].individual().clone(),
+        )])
+        .unwrap();
+        let expected = EvolutionState::new_with_archive(
+            1,
+            population,
+            vec![generation],
+            ranked[0].clone(),
+            4,
+            99,
+            archive,
+        )
+        .unwrap();
+        write_checkpoint(&output, &config, &expected).unwrap();
+        assert_eq!(read_checkpoint(&output, &config).unwrap(), expected);
         fs::remove_file(output).unwrap();
     }
 

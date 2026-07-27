@@ -14,6 +14,7 @@ use crate::{
     benchmark::BenchmarkConfig,
     evolution::{DefaultAnchorConfig, EvolutionConfig, EvolutionConfigError},
     experiment::ExperimentReport,
+    historical::HistoricalConfig,
     progress::{ProgressEvent, ProgressObserver},
     training::{TrainingConfig, TrainingConfigError},
     validation::{CandidateSelector, ValidationConfig, ValidationConfigError},
@@ -50,6 +51,11 @@ Training games:
   --max-opening-attempts N                [default: 100]
   --default-anchor-weight-percent N       Integer percent in 0..=100 [default: 0]
   --default-anchor-opening-pairs N        Pairs per individual/generation [default: 0]
+  --historical-weight-percent N           Historical fitness weight in 0..=100 [default: 0]
+  --historical-opponents N                Champions sampled per generation [default: 0]
+  --historical-opening-pairs N            Shared opening pairs per opponent [default: 0]
+  --historical-insertion-cadence N        Generations between champion insertions [default: 0]
+  --historical-max-size N                 Maximum retained champions [default: 0]
 
 Champion validation:
   --candidate best-ever                   Standalone candidate [default: best-ever]
@@ -463,6 +469,9 @@ fn evolution_error(error: &EvolutionConfigError) -> String {
         } => format!(
             "default anchor dimensions are too large for exact ranking: {swiss_rounds} Swiss rounds and {opening_pairs} opening pairs"
         ),
+        EvolutionConfigError::ConflictingTrainingObjectives => {
+            "historical league and default anchor cannot both be enabled".into()
+        }
     }
 }
 
@@ -505,6 +514,11 @@ struct RawValues {
     max_opening_attempts: usize,
     default_anchor_weight_percent: u8,
     default_anchor_opening_pairs: usize,
+    historical_weight_percent: u8,
+    historical_opponents: usize,
+    historical_opening_pairs: usize,
+    historical_insertion_cadence: usize,
+    historical_max_size: usize,
     validation_depths: Vec<usize>,
     validation_openings: usize,
     validation_max_game_plies: usize,
@@ -546,6 +560,11 @@ impl Default for RawValues {
             max_opening_attempts: training.max_opening_attempts(),
             default_anchor_weight_percent: evolution.default_anchor().weight_percent(),
             default_anchor_opening_pairs: evolution.default_anchor().opening_pairs(),
+            historical_weight_percent: evolution.historical().weight_percent(),
+            historical_opponents: evolution.historical().opponents(),
+            historical_opening_pairs: evolution.historical().opening_pairs(),
+            historical_insertion_cadence: evolution.historical().insertion_cadence(),
+            historical_max_size: evolution.historical().maximum_size(),
             validation_depths: validation.search_depths().to_vec(),
             validation_openings: validation.opening_count(),
             validation_max_game_plies: validation.max_game_plies(),
@@ -619,6 +638,17 @@ impl RawValues {
             "--default-anchor-opening-pairs" => {
                 number!(default_anchor_opening_pairs, "a non-negative integer")
             }
+            "--historical-weight-percent" => {
+                number!(historical_weight_percent, "an integer from 0 through 100")
+            }
+            "--historical-opponents" => number!(historical_opponents, "a non-negative integer"),
+            "--historical-opening-pairs" => {
+                number!(historical_opening_pairs, "a non-negative integer")
+            }
+            "--historical-insertion-cadence" => {
+                number!(historical_insertion_cadence, "a non-negative integer")
+            }
+            "--historical-max-size" => number!(historical_max_size, "a non-negative integer"),
             "--validation-depths" => {
                 self.validation_depths = parse_depths(option, value)?;
             }
@@ -671,6 +701,18 @@ impl RawValues {
             self.default_anchor_opening_pairs,
         )
         .map_err(CliError::EvolutionConfig)?;
+        let historical = HistoricalConfig::new(
+            self.historical_weight_percent,
+            self.historical_opponents,
+            self.historical_opening_pairs,
+            self.historical_insertion_cadence,
+            self.historical_max_size,
+        )
+        .map_err(|error| CliError::InvalidValue {
+            option: "--historical-*".into(),
+            value: format!("{error:?}"),
+            expected: "all zero (disabled), or positive league dimensions and a weight in 1..=100",
+        })?;
         let evolution = EvolutionConfig::new(
             training,
             self.generations,
@@ -685,6 +727,8 @@ impl RawValues {
         )
         .map_err(CliError::EvolutionConfig)?
         .with_default_anchor(anchor)
+        .map_err(CliError::EvolutionConfig)?
+        .with_historical(historical)
         .map_err(CliError::EvolutionConfig)?;
         Ok(TrainCommand {
             evolution,
@@ -1216,6 +1260,29 @@ mod tests {
                 EvolutionConfigError::InconsistentAnchorConfiguration { .. }
             ))
         ));
+    }
+
+    #[test]
+    fn historical_league_is_explicitly_opt_in_and_fully_configurable() {
+        let command = train(&[
+            "train",
+            "--historical-weight-percent",
+            "30",
+            "--historical-opponents",
+            "4",
+            "--historical-opening-pairs",
+            "2",
+            "--historical-insertion-cadence",
+            "3",
+            "--historical-max-size",
+            "16",
+        ]);
+        assert_eq!(
+            command.evolution.historical(),
+            HistoricalConfig::new(30, 4, 2, 3, 16).unwrap()
+        );
+        assert!(!EvolutionConfig::default().historical().enabled());
+        assert!(TrainCommand::from_args(["train", "--historical-weight-percent", "30"]).is_err());
     }
 
     #[test]
