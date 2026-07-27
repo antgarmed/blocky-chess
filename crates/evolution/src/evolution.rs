@@ -10,10 +10,11 @@ use std::{
 
 use crate::{
     encounter::{
-        DefaultAnchorRoundExecutor, ParallelRoundExecutor, RoundExecutionError, RoundExecutor,
+        AuxiliaryRoundExecutor, ParallelRoundExecutor, RoundExecutionError, RoundExecutor,
         SequentialRoundExecutor,
     },
     genome::{Genome, GenomeError, GENE_COUNT},
+    historical::{phenotype_fingerprint, HistoricalArchive, HistoricalAudit, HistoricalConfig},
     openings::{OpeningGenerationError, OpeningPool},
     pairing::{IndividualId, PairingError, Score, Standing, SwissScheduler},
     progress::{NoopProgressObserver, ProgressEvent, ProgressObserver},
@@ -84,6 +85,7 @@ pub struct EvolutionConfig {
     mutation_step: f64,
     strong_mutation_step: f64,
     default_anchor: DefaultAnchorConfig,
+    historical: HistoricalConfig,
 }
 
 impl EvolutionConfig {
@@ -147,6 +149,7 @@ impl EvolutionConfig {
             mutation_step,
             strong_mutation_step,
             default_anchor: DefaultAnchorConfig::default(),
+            historical: HistoricalConfig::default(),
         })
     }
 
@@ -200,6 +203,19 @@ impl EvolutionConfig {
     }
     pub const fn default_anchor(&self) -> DefaultAnchorConfig {
         self.default_anchor
+    }
+    pub fn with_historical(
+        mut self,
+        historical: HistoricalConfig,
+    ) -> Result<Self, EvolutionConfigError> {
+        if historical.enabled() && self.default_anchor.enabled() {
+            return Err(EvolutionConfigError::ConflictingTrainingObjectives);
+        }
+        self.historical = historical;
+        Ok(self)
+    }
+    pub const fn historical(&self) -> HistoricalConfig {
+        self.historical
     }
 }
 
@@ -270,6 +286,7 @@ pub enum EvolutionConfigError {
         swiss_rounds: usize,
         opening_pairs: usize,
     },
+    ConflictingTrainingObjectives,
 }
 
 impl fmt::Display for EvolutionConfigError {
@@ -330,6 +347,7 @@ pub struct FitnessScore {
     maximum_selection_units: u32,
     self_play: ScoreComponent,
     default_anchor: Option<ScoreComponent>,
+    historical: Option<ScoreComponent>,
 }
 
 impl FitnessScore {
@@ -339,6 +357,7 @@ impl FitnessScore {
             maximum_selection_units: 0,
             self_play: ScoreComponent::new(half_points, 0),
             default_anchor: None,
+            historical: None,
         }
     }
     pub const fn new(
@@ -352,6 +371,21 @@ impl FitnessScore {
             maximum_selection_units,
             self_play,
             default_anchor,
+            historical: None,
+        }
+    }
+    pub const fn with_historical(
+        selection_units: Score,
+        maximum_selection_units: u32,
+        self_play: ScoreComponent,
+        historical: ScoreComponent,
+    ) -> Self {
+        Self {
+            selection_units,
+            maximum_selection_units,
+            self_play,
+            default_anchor: None,
+            historical: Some(historical),
         }
     }
     pub const fn selection_units(self) -> Score {
@@ -365,6 +399,9 @@ impl FitnessScore {
     }
     pub const fn default_anchor(self) -> Option<ScoreComponent> {
         self.default_anchor
+    }
+    pub const fn historical(self) -> Option<ScoreComponent> {
+        self.historical
     }
     pub const fn is_legacy(self) -> bool {
         self.maximum_selection_units == 0
@@ -616,6 +653,22 @@ pub trait PopulationEvaluator {
         self.evaluate(generation, population, config)
     }
 
+    fn evaluate_with_history(
+        &mut self,
+        generation: usize,
+        population: &[Individual],
+        archive: &HistoricalArchive,
+        config: &EvolutionConfig,
+        observer: &mut dyn ProgressObserver,
+    ) -> Result<Vec<Standing>, Self::Error> {
+        let _ = archive;
+        self.evaluate_with_progress(generation, population, config, observer)
+    }
+
+    fn historical_audit(&self) -> HistoricalAudit {
+        HistoricalAudit::default()
+    }
+
     fn fitness_score(
         &self,
         _individual: IndividualId,
@@ -630,6 +683,9 @@ pub struct SelfPlayPopulationEvaluator<E> {
     executor: E,
     last_self_play_scores: BTreeMap<IndividualId, Score>,
     last_anchor_scores: Option<BTreeMap<IndividualId, Score>>,
+    last_historical_scores: Option<BTreeMap<IndividualId, Score>>,
+    last_historical_available: u32,
+    last_historical_audit: HistoricalAudit,
 }
 
 impl<R> SelfPlayPopulationEvaluator<SequentialRoundExecutor<R>> {
@@ -638,6 +694,9 @@ impl<R> SelfPlayPopulationEvaluator<SequentialRoundExecutor<R>> {
             executor: SequentialRoundExecutor::new(runner),
             last_self_play_scores: BTreeMap::new(),
             last_anchor_scores: None,
+            last_historical_scores: None,
+            last_historical_available: 0,
+            last_historical_audit: HistoricalAudit::default(),
         }
     }
 
@@ -652,11 +711,14 @@ impl<F> SelfPlayPopulationEvaluator<ParallelRoundExecutor<F>> {
             executor: ParallelRoundExecutor::new(factory, workers),
             last_self_play_scores: BTreeMap::new(),
             last_anchor_scores: None,
+            last_historical_scores: None,
+            last_historical_available: 0,
+            last_historical_audit: HistoricalAudit::default(),
         }
     }
 }
 
-impl<E: RoundExecutor + DefaultAnchorRoundExecutor> PopulationEvaluator
+impl<E: RoundExecutor + AuxiliaryRoundExecutor> PopulationEvaluator
     for SelfPlayPopulationEvaluator<E>
 {
     type Error = SelfPlayEvaluationError<E::Error>;
@@ -814,6 +876,97 @@ impl<E: RoundExecutor + DefaultAnchorRoundExecutor> PopulationEvaluator
         Ok(standings)
     }
 
+    fn evaluate_with_history(
+        &mut self,
+        generation: usize,
+        population: &[Individual],
+        archive: &HistoricalArchive,
+        config: &EvolutionConfig,
+        observer: &mut dyn ProgressObserver,
+    ) -> Result<Vec<Standing>, Self::Error> {
+        let mut standings =
+            self.evaluate_with_progress(generation, population, config, observer)?;
+        self.last_historical_scores = None;
+        self.last_historical_available = 0;
+        self.last_historical_audit = HistoricalAudit {
+            distinct_phenotypes: population
+                .iter()
+                .map(|individual| phenotype_fingerprint(individual.genome()))
+                .collect::<BTreeSet<_>>()
+                .len(),
+            archive_size_before: archive.entries().len(),
+            archive_size_after: archive.entries().len(),
+            ..HistoricalAudit::default()
+        };
+        let historical = config.historical();
+        let sampled = archive.sample(
+            historical.opponents(),
+            config.training().master_seed(),
+            generation,
+        );
+        if !historical.enabled() || sampled.is_empty() {
+            return Ok(standings);
+        }
+        let seed = derive_seed(
+            config.training().master_seed(),
+            generation as u64,
+            0x4849_5354_4f50_454e,
+        );
+        let training = config.training().with_master_seed(seed);
+        let openings = OpeningPool::generate(historical.opening_pairs(), &training)
+            .map_err(SelfPlayEvaluationError::Opening)?;
+        let candidates = population
+            .iter()
+            .map(|individual| (individual.id(), individual.genome().clone()))
+            .collect::<Vec<_>>();
+        let opponents = sampled
+            .iter()
+            .map(|entry| (entry.champion().id(), entry.champion().genome().clone()))
+            .collect::<Vec<_>>();
+        let mut scores = population
+            .iter()
+            .map(|individual| (individual.id(), Score(0)))
+            .collect::<BTreeMap<_, _>>();
+        for opening in openings.openings() {
+            for record in self
+                .executor
+                .play_historical_round(&candidates, &opponents, opening, &training)
+                .map_err(SelfPlayEvaluationError::Round)?
+            {
+                scores
+                    .get_mut(&record.candidate)
+                    .expect("candidate exists")
+                    .0 += record.candidate_score.0;
+            }
+        }
+        let available = (sampled.len() * historical.opening_pairs() * 4) as u32;
+        self.last_historical_available = available;
+        self.last_historical_scores = Some(scores.clone());
+        self.last_historical_audit.opponent_generations =
+            sampled.iter().map(|entry| entry.generation()).collect();
+        self.last_historical_audit.opponent_ids =
+            sampled.iter().map(|entry| entry.champion().id()).collect();
+        self.last_historical_audit.opening_ids = openings
+            .openings()
+            .iter()
+            .map(|opening| opening.id)
+            .collect();
+        for standing in &mut standings {
+            standing.score = historical_selection_score(
+                self.last_self_play_scores[&standing.individual],
+                scores[&standing.individual],
+                (config.swiss_rounds() * 4) as u32,
+                available,
+                historical.weight_percent(),
+            );
+        }
+        Ok(standings)
+    }
+
+    fn historical_audit(&self) -> HistoricalAudit {
+        self.last_historical_audit.clone()
+    }
+
     fn fitness_score(
         &self,
         individual: IndividualId,
@@ -823,6 +976,18 @@ impl<E: RoundExecutor + DefaultAnchorRoundExecutor> PopulationEvaluator
         let self_play = self.last_self_play_scores[&individual];
         let self_available = (config.swiss_rounds() * 4) as u32;
         let anchor = config.default_anchor();
+        if config.historical().enabled() && self.last_historical_available > 0 {
+            let historical = self
+                .last_historical_scores
+                .as_ref()
+                .expect("historical scores recorded")[&individual];
+            return FitnessScore::with_historical(
+                standing,
+                10_000,
+                ScoreComponent::new(self_play, self_available),
+                ScoreComponent::new(historical, self.last_historical_available),
+            );
+        }
         if !anchor.enabled() {
             return FitnessScore::new(
                 standing,
@@ -844,6 +1009,24 @@ impl<E: RoundExecutor + DefaultAnchorRoundExecutor> PopulationEvaluator
             )),
         )
     }
+}
+
+pub fn historical_selection_score(
+    contemporary: Score,
+    historical: Score,
+    contemporary_available: u32,
+    historical_available: u32,
+    historical_weight_percent: u8,
+) -> Score {
+    if historical_available == 0 || historical_weight_percent == 0 {
+        return contemporary;
+    }
+    let contemporary_weight = 100 - u32::from(historical_weight_percent);
+    let units = u64::from(contemporary.0) * u64::from(contemporary_weight) * 100
+        / u64::from(contemporary_available)
+        + u64::from(historical.0) * u64::from(historical_weight_percent) * 100
+            / u64::from(historical_available);
+    Score(units as u32)
 }
 
 pub fn anchored_selection_score(
@@ -883,6 +1066,7 @@ impl<E: Error + 'static> Error for SelfPlayEvaluationError<E> {}
 pub struct GenerationResult {
     index: usize,
     ranked: Vec<EvaluatedIndividual>,
+    pub(crate) historical_audit: HistoricalAudit,
 }
 
 impl GenerationResult {
@@ -893,7 +1077,11 @@ impl GenerationResult {
         if ranked.is_empty() {
             return Err(EvolutionStateError::EmptyRanking);
         }
-        Ok(Self { index, ranked })
+        Ok(Self {
+            index,
+            ranked,
+            historical_audit: HistoricalAudit::default(),
+        })
     }
     pub const fn index(&self) -> usize {
         self.index
@@ -903,6 +1091,9 @@ impl GenerationResult {
     }
     pub fn best(&self) -> &EvaluatedIndividual {
         &self.ranked[0]
+    }
+    pub fn historical_audit(&self) -> &HistoricalAudit {
+        &self.historical_audit
     }
 }
 
@@ -942,6 +1133,7 @@ pub struct EvolutionState {
     best_ever: EvaluatedIndividual,
     next_id: u64,
     rng_state: u64,
+    archive: HistoricalArchive,
 }
 
 impl EvolutionState {
@@ -978,6 +1170,51 @@ impl EvolutionState {
         if next_id <= maximum_id {
             return Err(EvolutionStateError::InvalidNextId);
         }
+        Self::new_with_archive(
+            next_generation,
+            population,
+            generations,
+            best_ever,
+            next_id,
+            rng_state,
+            HistoricalArchive::default(),
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub fn new_with_archive(
+        next_generation: usize,
+        population: Vec<Individual>,
+        generations: Vec<GenerationResult>,
+        best_ever: EvaluatedIndividual,
+        next_id: u64,
+        rng_state: u64,
+        archive: HistoricalArchive,
+    ) -> Result<Self, EvolutionStateError> {
+        if next_generation == 0 || generations.len() != next_generation {
+            return Err(EvolutionStateError::GenerationMismatch);
+        }
+        if generations
+            .iter()
+            .enumerate()
+            .any(|(index, generation)| generation.index() != index)
+        {
+            return Err(EvolutionStateError::NonContiguousHistory);
+        }
+        let maximum_id = population
+            .iter()
+            .map(|individual| individual.id().0)
+            .chain(generations.iter().flat_map(|generation| {
+                generation
+                    .ranked()
+                    .iter()
+                    .map(|individual| individual.individual().id().0)
+            }))
+            .max()
+            .unwrap_or(0);
+        if next_id <= maximum_id {
+            return Err(EvolutionStateError::InvalidNextId);
+        }
         Ok(Self {
             next_generation,
             population,
@@ -985,6 +1222,7 @@ impl EvolutionState {
             best_ever,
             next_id,
             rng_state,
+            archive,
         })
     }
 
@@ -1005,6 +1243,9 @@ impl EvolutionState {
     }
     pub const fn rng_state(&self) -> u64 {
         self.rng_state
+    }
+    pub const fn archive(&self) -> &HistoricalArchive {
+        &self.archive
     }
 }
 
@@ -1134,7 +1375,15 @@ impl<E: PopulationEvaluator> EvolutionEngine<E> {
         &mut self,
         population: Vec<Individual>,
     ) -> Result<EvolutionResult, EvolutionError<E::Error>> {
-        self.run_internal(population, 0, Vec::new(), None, false, |_| Ok(()))
+        self.run_internal(
+            population,
+            0,
+            Vec::new(),
+            None,
+            HistoricalArchive::default(),
+            false,
+            |_| Ok(()),
+        )
     }
 
     /// Resumes a persisted run and exposes a consistent state after each newly
@@ -1163,6 +1412,7 @@ impl<E: PopulationEvaluator> EvolutionEngine<E> {
             state.next_generation,
             state.generations,
             Some(state.best_ever),
+            state.archive,
             true,
             checkpoint,
         )
@@ -1177,15 +1427,25 @@ impl<E: PopulationEvaluator> EvolutionEngine<E> {
         F: FnMut(&EvolutionState) -> Result<(), Box<dyn Error + Send + Sync>>,
     {
         let population = self.initialize_population();
-        self.run_internal(population, 0, Vec::new(), None, true, checkpoint)
+        self.run_internal(
+            population,
+            0,
+            Vec::new(),
+            None,
+            HistoricalArchive::default(),
+            true,
+            checkpoint,
+        )
     }
 
+    #[allow(clippy::too_many_arguments)]
     fn run_internal<F>(
         &mut self,
         mut population: Vec<Individual>,
         start_generation: usize,
         mut generations: Vec<GenerationResult>,
         mut best_ever: Option<EvaluatedIndividual>,
+        mut archive: HistoricalArchive,
         publish_checkpoints: bool,
         mut checkpoint: F,
     ) -> Result<EvolutionResult, EvolutionError<E::Error>>
@@ -1209,9 +1469,10 @@ impl<E: PopulationEvaluator> EvolutionEngine<E> {
             });
             let standings = self
                 .evaluator
-                .evaluate_with_progress(
+                .evaluate_with_history(
                     generation,
                     &population,
+                    &archive,
                     &self.config,
                     self.observer.as_mut(),
                 )
@@ -1229,17 +1490,34 @@ impl<E: PopulationEvaluator> EvolutionEngine<E> {
                     )
                 })
                 .collect();
-            let ranked = rank_population_with_scores(&population, standings, &fitness_scores)?;
-            if best_ever
-                .as_ref()
-                .is_none_or(|best| is_fitter(&ranked[0], best))
+            let ranked = rank_population_with_scores(
+                &population,
+                standings,
+                &fitness_scores,
+                derive_seed(
+                    self.config.training().master_seed(),
+                    generation as u64,
+                    0x5449_4542_5245_414b,
+                ),
+            )?;
+            if self.config.historical().enabled()
+                || best_ever
+                    .as_ref()
+                    .is_none_or(|best| is_fitter(&ranked[0], best))
             {
                 best_ever = Some(ranked[0].clone());
             }
             generations.push(GenerationResult {
                 index: generation,
                 ranked: ranked.clone(),
+                historical_audit: self.evaluator.historical_audit(),
             });
+            archive.insert_champion(generation, &ranked[0], self.config.historical());
+            generations
+                .last_mut()
+                .expect("generation was just appended")
+                .historical_audit
+                .archive_size_after = archive.entries().len();
             self.observer.on_event(ProgressEvent::GenerationCompleted {
                 generation,
                 total_generations: self.config.generations(),
@@ -1254,13 +1532,14 @@ impl<E: PopulationEvaluator> EvolutionEngine<E> {
                     .rng
                     .persistent_state()
                     .ok_or(EvolutionError::RandomSourceNotPersistent)?;
-                let state = EvolutionState::new(
+                let state = EvolutionState::new_with_archive(
                     generation + 1,
                     population.clone(),
                     generations.clone(),
                     best_ever.clone().expect("this generation produced a best"),
                     self.next_id,
                     rng_state,
+                    archive.clone(),
                 )
                 .expect("engine produces a valid resumable state");
                 checkpoint(&state).map_err(EvolutionError::Checkpoint)?;
@@ -1362,13 +1641,14 @@ fn rank_population<E>(
         .iter()
         .map(|standing| (standing.individual, FitnessScore::legacy(standing.score)))
         .collect();
-    rank_population_with_scores(population, standings, &fitness_scores)
+    rank_population_with_scores(population, standings, &fitness_scores, 0)
 }
 
 fn rank_population_with_scores<E>(
     population: &[Individual],
     standings: Vec<Standing>,
     fitness_scores: &BTreeMap<IndividualId, FitnessScore>,
+    tie_seed: u64,
 ) -> Result<Vec<EvaluatedIndividual>, EvolutionError<E>> {
     if standings.len() != population.len() {
         return Err(EvolutionError::InvalidStandings);
@@ -1390,18 +1670,21 @@ fn rank_population_with_scores<E>(
             EvaluatedIndividual::with_fitness(individual.clone(), fitness_scores[&individual.id()])
         })
         .collect();
+    let tie_keys: BTreeMap<_, _> = population
+        .iter()
+        .enumerate()
+        .map(|(index, individual)| (individual.id(), derive_seed(tie_seed, index as u64, 0)))
+        .collect();
     ranked.sort_by(|left, right| {
-        right
-            .fitness()
-            .cmp(&left.fitness())
-            .then_with(|| left.individual().id().cmp(&right.individual().id()))
+        right.fitness().cmp(&left.fitness()).then_with(|| {
+            tie_keys[&left.individual().id()].cmp(&tie_keys[&right.individual().id()])
+        })
     });
     Ok(ranked)
 }
 
 fn is_fitter(left: &EvaluatedIndividual, right: &EvaluatedIndividual) -> bool {
     left.fitness() > right.fitness()
-        || (left.fitness() == right.fitness() && left.individual().id() < right.individual().id())
 }
 
 #[derive(Debug)]
@@ -1576,6 +1859,94 @@ mod tests {
             anchored_selection_score(Score(7), Score(99), 5, DefaultAnchorConfig::default()),
             Score(7)
         );
+    }
+
+    #[test]
+    fn historical_fitness_normalizes_full_partial_and_empty_archives() {
+        let full = historical_selection_score(Score(10), Score(4), 20, 8, 30);
+        let partial = historical_selection_score(Score(10), Score(2), 20, 4, 30);
+        assert_eq!(full, partial);
+        assert_eq!(full, Score(5_000));
+        assert_eq!(
+            historical_selection_score(Score(10), Score(0), 20, 0, 30),
+            Score(10)
+        );
+    }
+
+    #[test]
+    fn historical_evaluation_shares_opponent_and_opening_and_reverses_colors_without_default() {
+        let historical = HistoricalConfig::new(30, 1, 1, 1, 4).unwrap();
+        let config = config(2, 1).with_historical(historical).unwrap();
+        let population = (0..4)
+            .map(|id| {
+                let mut genes = [0.05; GENE_COUNT];
+                genes[id] = 1.0;
+                Individual::new(IndividualId(id as u64), Genome::new(genes).unwrap())
+            })
+            .collect::<Vec<_>>();
+        let mut opponent_genes = [0.02; GENE_COUNT];
+        opponent_genes[8] = 1.0;
+        let opponent = Individual::new(IndividualId(99), Genome::new(opponent_genes).unwrap());
+        let champion = EvaluatedIndividual::new(opponent.clone(), Score(0));
+        let mut archive = HistoricalArchive::default();
+        archive.insert_champion(0, &champion, historical);
+        let mut evaluator = SelfPlayPopulationEvaluator::new(RecordingDrawRunner::default());
+        evaluator
+            .evaluate_with_history(1, &population, &archive, &config, &mut NoopProgressObserver)
+            .unwrap();
+
+        let calls = &evaluator.runner().calls;
+        let historical_calls = &calls[calls.len() - population.len() * 2..];
+        for (candidate, pair) in population.iter().zip(historical_calls.chunks_exact(2)) {
+            assert_eq!(pair[0].0, *candidate.genome());
+            assert_eq!(pair[0].1, *opponent.genome());
+            assert_eq!(pair[1].0, *opponent.genome());
+            assert_eq!(pair[1].1, *candidate.genome());
+            assert_eq!(pair[0].2, pair[1].2);
+        }
+        assert_eq!(
+            evaluator.historical_audit().opponent_ids,
+            vec![IndividualId(99)]
+        );
+        assert_eq!(evaluator.historical_audit().opening_ids.len(), 1);
+    }
+
+    #[test]
+    fn deterministic_tie_lottery_does_not_always_favour_the_lowest_id() {
+        let population = (0..4)
+            .map(|id| {
+                let mut genes = [0.1; GENE_COUNT];
+                genes[id] = 1.0;
+                Individual::new(IndividualId(id as u64), Genome::new(genes).unwrap())
+            })
+            .collect::<Vec<_>>();
+        let standings = population
+            .iter()
+            .map(|individual| Standing {
+                individual: individual.id(),
+                score: Score(2),
+            })
+            .collect::<Vec<_>>();
+        let fitness = standings
+            .iter()
+            .map(|standing| (standing.individual, FitnessScore::legacy(standing.score)))
+            .collect::<BTreeMap<_, _>>();
+        let winners = (0..64)
+            .map(|seed| {
+                rank_population_with_scores::<std::convert::Infallible>(
+                    &population,
+                    standings.clone(),
+                    &fitness,
+                    seed,
+                )
+                .unwrap()[0]
+                    .individual()
+                    .id()
+            })
+            .collect::<BTreeSet<_>>();
+        assert!(winners.len() > 1);
+        assert!(winners.contains(&IndividualId(0)));
+        assert!(winners.iter().any(|id| *id != IndividualId(0)));
     }
 
     #[test]
@@ -1902,7 +2273,7 @@ mod tests {
         let training = TrainingConfig::new(1, 1, 77, 2..=2, 100).unwrap();
         let configuration = EvolutionConfig::new(training, 2, 4, 2, 1, 2, 0.15, 0.02, 0.1, 0.5)
             .unwrap()
-            .with_default_anchor(DefaultAnchorConfig::new(10, 1).unwrap())
+            .with_historical(HistoricalConfig::new(30, 1, 1, 1, 4).unwrap())
             .unwrap();
         let mut sequential = EvolutionEngine::with_defaults(
             configuration.clone(),
@@ -2174,7 +2545,9 @@ mod tests {
 
     #[test]
     fn resumed_run_is_bit_for_bit_equal_and_does_not_repeat_completed_generations() {
-        let configuration = config(4, 1);
+        let configuration = config(4, 1)
+            .with_historical(HistoricalConfig::new(30, 1, 1, 1, 3).unwrap())
+            .unwrap();
         let baseline_seen = Rc::new(RefCell::new(vec![]));
         let mut baseline = EvolutionEngine::with_defaults(
             configuration.clone(),
@@ -2202,6 +2575,16 @@ mod tests {
         });
         assert!(matches!(result, Err(EvolutionError::Checkpoint(_))));
         assert_eq!(interrupted_seen.borrow().len(), 2);
+        assert_eq!(
+            captured
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .archive()
+                .entries()
+                .len(),
+            1
+        );
 
         let resumed_seen = Rc::new(RefCell::new(vec![]));
         let mut resumed = EvolutionEngine::with_defaults(
@@ -2216,5 +2599,38 @@ mod tests {
 
         assert_eq!(actual, expected);
         assert_eq!(resumed_seen.borrow().len(), 2);
+    }
+
+    #[test]
+    fn historical_self_play_resume_is_exactly_equal_to_uninterrupted_execution() {
+        let configuration = config(3, 1)
+            .with_historical(HistoricalConfig::new(30, 2, 1, 1, 3).unwrap())
+            .unwrap();
+        let mut baseline = EvolutionEngine::with_defaults(
+            configuration.clone(),
+            SelfPlayPopulationEvaluator::new(DrawRunner),
+        );
+        let expected = baseline.run().unwrap();
+
+        let mut interrupted = EvolutionEngine::with_defaults(
+            configuration.clone(),
+            SelfPlayPopulationEvaluator::new(DrawRunner),
+        );
+        let mut captured = None;
+        let result = interrupted.run_with_checkpoints(|state| {
+            if state.next_generation() == 1 {
+                captured = Some(state.clone());
+                return Err(Box::new(std::io::Error::other("interrupt")));
+            }
+            Ok(())
+        });
+        assert!(matches!(result, Err(EvolutionError::Checkpoint(_))));
+
+        let mut resumed = EvolutionEngine::with_defaults(
+            configuration,
+            SelfPlayPopulationEvaluator::new(DrawRunner),
+        );
+        let actual = resumed.run_resuming(captured.unwrap(), |_| Ok(())).unwrap();
+        assert_eq!(actual, expected);
     }
 }

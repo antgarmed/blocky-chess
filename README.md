@@ -103,6 +103,25 @@ Both anchor options default to zero. A positive weight requires a positive
 pair count and vice versa, so an ordinary invocation preserves the original
 zero-knowledge self-play behavior.
 
+Historical-league self-play is a separate, zero-knowledge opt-in objective.
+It combines normalized contemporary Swiss performance with paired games
+against generation champions retained inside the run:
+
+```bash
+cargo run --release -p blocky-evolution -- train \
+  --historical-weight-percent 30 \
+  --historical-opponents 4 \
+  --historical-opening-pairs 2 \
+  --historical-insertion-cadence 1 \
+  --historical-max-size 16
+```
+
+The sampled champions and openings are shared by every candidate in a
+generation. The archive, samples, component scores, effective-phenotype
+diversity and archive sizes are persisted in checkpoints/reports. Historical
+league and default-anchor training are mutually exclusive, and both remain
+disabled for existing experiments unless explicitly configured.
+
 Standard output reports compact live progress: one startup line, one line per
 completed generation, checkpoint saves, and the final summary. Each line is
 flushed immediately so redirected logs can be monitored while training.

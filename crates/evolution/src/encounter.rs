@@ -161,6 +161,38 @@ pub struct ConfiguredEncounterRecord {
     pub candidate_score: Score,
 }
 
+#[derive(Clone, Debug)]
+pub struct HistoricalEncounterRecord {
+    pub candidate: IndividualId,
+    pub opponent: IndividualId,
+    pub opening: crate::openings::OpeningId,
+    pub first_game: GameRecord,
+    pub second_game: GameRecord,
+    pub candidate_score: Score,
+}
+
+fn play_historical_encounter<R: GameRunner>(
+    runner: &mut R,
+    candidate: (IndividualId, &Genome),
+    opponent: (IndividualId, &Genome),
+    opening: &Opening,
+    config: &TrainingConfig,
+) -> Result<HistoricalEncounterRecord, R::Error> {
+    let pairing = Pairing {
+        a: candidate.0,
+        b: opponent.0,
+    };
+    let record = play_encounter(runner, pairing, candidate.1, opponent.1, opening, config)?;
+    Ok(HistoricalEncounterRecord {
+        candidate: candidate.0,
+        opponent: opponent.0,
+        opening: opening.id,
+        first_game: record.first_game,
+        second_game: record.second_game,
+        candidate_score: record.a_score,
+    })
+}
+
 fn play_configured_encounter<R: ConfiguredGameRunner>(
     runner: &mut R,
     candidate: IndividualId,
@@ -271,13 +303,21 @@ pub trait RoundExecutor {
     ) -> Result<Vec<EncounterRecord>, RoundExecutionError<Self::Error>>;
 }
 
-pub trait DefaultAnchorRoundExecutor: RoundExecutor {
+pub trait AuxiliaryRoundExecutor: RoundExecutor {
     fn play_default_anchor_round(
         &mut self,
         candidates: &[(IndividualId, EvaluationConfig)],
         opening: &Opening,
         config: &TrainingConfig,
     ) -> Result<Vec<ConfiguredEncounterRecord>, RoundExecutionError<Self::Error>>;
+
+    fn play_historical_round(
+        &mut self,
+        candidates: &[(IndividualId, Genome)],
+        opponents: &[(IndividualId, Genome)],
+        opening: &Opening,
+        config: &TrainingConfig,
+    ) -> Result<Vec<HistoricalEncounterRecord>, RoundExecutionError<Self::Error>>;
 }
 
 pub struct SequentialRoundExecutor<R> {
@@ -308,7 +348,7 @@ impl<R: GameRunner> RoundExecutor for SequentialRoundExecutor<R> {
     }
 }
 
-impl<R> DefaultAnchorRoundExecutor for SequentialRoundExecutor<R>
+impl<R> AuxiliaryRoundExecutor for SequentialRoundExecutor<R>
 where
     R: GameRunner + ConfiguredGameRunner<Error = <R as GameRunner>::Error>,
 {
@@ -323,6 +363,29 @@ where
             .map(|(id, candidate)| {
                 play_configured_encounter(&mut self.runner, *id, *candidate, opening, config)
                     .map_err(RoundExecutionError::Game)
+            })
+            .collect()
+    }
+
+    fn play_historical_round(
+        &mut self,
+        candidates: &[(IndividualId, Genome)],
+        opponents: &[(IndividualId, Genome)],
+        opening: &Opening,
+        config: &TrainingConfig,
+    ) -> Result<Vec<HistoricalEncounterRecord>, RoundExecutionError<Self::Error>> {
+        candidates
+            .iter()
+            .flat_map(|candidate| opponents.iter().map(move |opponent| (candidate, opponent)))
+            .map(|(candidate, opponent)| {
+                play_historical_encounter(
+                    &mut self.runner,
+                    (candidate.0, &candidate.1),
+                    (opponent.0, &opponent.1),
+                    opening,
+                    config,
+                )
+                .map_err(RoundExecutionError::Game)
             })
             .collect()
     }
@@ -425,7 +488,7 @@ where
     }
 }
 
-impl<F> DefaultAnchorRoundExecutor for ParallelRoundExecutor<F>
+impl<F> AuxiliaryRoundExecutor for ParallelRoundExecutor<F>
 where
     F: GameRunnerFactory
         + ConfiguredGameRunnerFactory<Runner = <F as GameRunnerFactory>::Runner>
@@ -493,6 +556,82 @@ where
             .map(|result| {
                 result
                     .expect("every anchor candidate must produce one result")
+                    .map_err(RoundExecutionError::Game)
+            })
+            .collect()
+    }
+
+    fn play_historical_round(
+        &mut self,
+        candidates: &[(IndividualId, Genome)],
+        opponents: &[(IndividualId, Genome)],
+        opening: &Opening,
+        config: &TrainingConfig,
+    ) -> Result<Vec<HistoricalEncounterRecord>, RoundExecutionError<Self::Error>> {
+        let tasks: Vec<_> = candidates
+            .iter()
+            .flat_map(|candidate| opponents.iter().map(move |opponent| (candidate, opponent)))
+            .collect();
+        let worker_count = self.workers.get().min(tasks.len());
+        if worker_count <= 1 {
+            let mut runner = GameRunnerFactory::create(&self.factory);
+            return tasks
+                .into_iter()
+                .map(|(candidate, opponent)| {
+                    play_historical_encounter(
+                        &mut runner,
+                        (candidate.0, &candidate.1),
+                        (opponent.0, &opponent.1),
+                        opening,
+                        config,
+                    )
+                    .map_err(RoundExecutionError::Game)
+                })
+                .collect();
+        }
+        let factory = &self.factory;
+        let tasks_ref = &tasks;
+        let worker_results = std::thread::scope(|scope| {
+            (0..worker_count)
+                .map(|worker| {
+                    scope.spawn(move || {
+                        let mut runner = GameRunnerFactory::create(factory);
+                        tasks_ref
+                            .iter()
+                            .enumerate()
+                            .skip(worker)
+                            .step_by(worker_count)
+                            .map(|(index, (candidate, opponent))| {
+                                (
+                                    index,
+                                    play_historical_encounter(
+                                        &mut runner,
+                                        (candidate.0, &candidate.1),
+                                        (opponent.0, &opponent.1),
+                                        opening,
+                                        config,
+                                    ),
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect::<Vec<_>>()
+                .into_iter()
+                .map(|handle| handle.join())
+                .collect::<Vec<_>>()
+        });
+        let mut ordered = (0..tasks.len()).map(|_| None).collect::<Vec<_>>();
+        for result in worker_results {
+            for (index, record) in result.map_err(|_| RoundExecutionError::WorkerPanic)? {
+                ordered[index] = Some(record);
+            }
+        }
+        ordered
+            .into_iter()
+            .map(|record| {
+                record
+                    .expect("every historical task produces a result")
                     .map_err(RoundExecutionError::Game)
             })
             .collect()
