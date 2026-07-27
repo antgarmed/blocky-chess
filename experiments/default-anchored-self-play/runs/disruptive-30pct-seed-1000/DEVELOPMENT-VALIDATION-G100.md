@@ -36,10 +36,11 @@ the RandomGenome distribution, but the external Default alignment was not
 preserved. This pilot therefore rejects the hypothesis that simply increasing
 the anchor weight to 30% solves the late-run objective drift.
 
-Any next intervention should address retention explicitly—for example,
-periodic held-out validation with selection pressure, a schedule for anchor
-weight, or a different objective—rather than treating 30% as a successful
-fixed-weight solution.
+Any next intervention should address retention explicitly—for example, a
+fixed training/selection panel kept separate from the sealed validation set,
+a schedule for anchor weight, or a different objective—rather than treating
+30% as a successful fixed-weight solution. The sealed validation set must
+remain completely outside training and selection.
 
 ## Artifact hashes
 
