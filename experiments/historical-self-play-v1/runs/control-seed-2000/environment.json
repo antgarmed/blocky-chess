@@ -1,0 +1,19 @@
+{
+  "run_id": "control-seed-2000",
+  "condition": "contemporary-only control",
+  "source_revision": "55f914499cfe911cfcfc33954ccaf4502b2c92c9",
+  "build_profile": "release",
+  "rustc": "1.97.1 (8bab26f4f 2026-07-14)",
+  "cargo": "1.97.1 (c980f4866 2026-06-30)",
+  "workers": 16,
+  "cpu": "13th Gen Intel(R) Core(TM) i9-13900HX (2.20 GHz)",
+  "ram": "32.0 GB (31.7 GB usable)",
+  "training_seed": 2000,
+  "target_generations": 50,
+  "checkpoint_every_generations": 1,
+  "notes": [
+    "Training-only G50 development batch.",
+    "No sealed validation seed is consumed.",
+    "No device name, GPU model, or additional hardware-identifying metadata is recorded."
+  ]
+}

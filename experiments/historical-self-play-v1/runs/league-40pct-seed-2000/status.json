@@ -1,0 +1,10 @@
+﻿{
+    "state":  "completed",
+    "process_id":  26664,
+    "exit_code":  0,
+    "started_at_utc":  "2026-07-28T14:28:19.2792472Z",
+    "ended_at_utc":  "2026-07-28T15:58:40.4236192Z",
+    "elapsed_seconds":  5421.144,
+    "checkpoint_next_generation":  50,
+    "stderr_bytes":  0
+}
