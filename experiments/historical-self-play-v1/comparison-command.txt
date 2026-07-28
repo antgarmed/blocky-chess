@@ -1,0 +1,24 @@
+For each condition in control-seed-2000 and league-40pct-seed-2000,
+and each generation in 1, 25, and 50:
+
+target\release\blocky-evolution.exe validate `
+  --checkpoint <run>\checkpoint.json `
+  --report <run>\development-validation-generation-NNN-depth4.json `
+  --generation N `
+  --workers 16 `
+  --validation-depths 4 `
+  --validation-openings 20 `
+  --validation-seed 2026072501 `
+  --validation-max-game-plies 200
+
+target\release\blocky-evolution.exe benchmark `
+  --checkpoint <run>\checkpoint.json `
+  --report <run>\control-benchmark-generation-NNN-depth4.json `
+  --generation N `
+  --workers 16 `
+  --benchmark-depth 4 `
+  --benchmark-openings 20 `
+  --benchmark-max-game-plies 200 `
+  --random-genomes 8 `
+  --benchmark-seed 2026072502 `
+  --opponent-seed 2026072503

@@ -1,0 +1,10 @@
+﻿{
+    "state":  "completed",
+    "exit_code":  0,
+    "completed_commands":  12,
+    "expected_commands":  12,
+    "started_at_utc":  "2026-07-28T16:07:50.7929410Z",
+    "ended_at_utc":  "2026-07-28T16:22:49.7965329Z",
+    "elapsed_seconds":  899.004,
+    "stderr_bytes":  0
+}
