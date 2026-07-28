@@ -18,6 +18,11 @@ population, and `state.next_generation = 50`. Both stdout logs end with
 `Training complete: 50 generations; validation skipped`. No training process
 remained after completion.
 
+The launchers did not record the SHA-256 of the release executable or verify
+its source revision. This is a minor provenance gap, documented in the main
+experiment protocol and hardened for future runs with `prepare-and-run.ps1`.
+No binary hash has been invented retroactively.
+
 ## Historical archive sanity checks
 
 The control archive is empty. The league archive contains ten champions,

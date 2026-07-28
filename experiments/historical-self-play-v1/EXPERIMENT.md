@@ -94,6 +94,41 @@ A run is complete only when the launcher has exited successfully, stderr is
 empty, the checkpoint is valid JSON, `state.next_generation` is 50, and
 stdout records completion of training.
 
+### Binary provenance
+
+The completed seed-2000 launchers checked that
+`target/release/blocky-evolution.exe` existed, but did not hash it or prove
+that it was built from the recorded source revision. The checkpoints,
+configuration, deterministic agreement at G1, logs, and observed behavior are
+consistent with the intended code, so this does not invalidate the runs.
+Nevertheless, exact binary provenance cannot be reconstructed retroactively
+and remains a documented reproducibility limitation.
+
+Future runs must be started through
+[`prepare-and-run.ps1`](prepare-and-run.ps1). The preflight:
+
+1. verifies that all workspace source paths match the expected source
+   revision, while allowing later experiment-only documentation commits;
+2. rejects untracked files under those source paths;
+3. rebuilds `blocky-evolution` in release mode;
+4. writes `binary-provenance.json` with the expected source revision, current
+   HEAD, toolchain versions, binary length, and SHA-256;
+5. only then invokes the run-specific launcher.
+
+The run-specific launcher remains the authoritative record of runtime
+arguments. Preflight provenance is additive and must never replace the exact
+command, environment, logs, or checkpoint.
+
+Launch a future run by detaching the preflight itself, passing an existing
+run directory and the frozen source revision:
+
+```powershell
+powershell.exe -NoProfile -ExecutionPolicy Bypass `
+  -File experiments/historical-self-play-v1/prepare-and-run.ps1 `
+  -RunDirectory experiments/historical-self-play-v1/runs/<run-id> `
+  -ExpectedSourceRevision <commit>
+```
+
 ## Monitoring
 
 After each condition starts, verify process liveness, increasing CPU time,

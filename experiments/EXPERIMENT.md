@@ -1,6 +1,6 @@
 # Evolution Experiment Portfolio
 
-The evolutionary work is organized as two separate experiments so that a
+The evolutionary work is organized as three separate experiments so that a
 change in the training objective cannot be confused with a continuation of the
 original protocol.
 
@@ -10,11 +10,12 @@ original protocol.
 | --- | --- | --- |
 | [`zero-knowledge-self-play`](zero-knowledge-self-play/EXPERIMENT.md) | Contemporary self-play only | Original protocol; seed 1000 completed |
 | [`default-anchored-self-play`](default-anchored-self-play/EXPERIMENT.md) | Contemporary self-play plus a `Default` anchor | Small-anchor seed 1000 completed; disruptive 30% pilot established |
-| [`historical-self-play-v1`](historical-self-play-v1/EXPERIMENT.md) | Contemporary self-play with or without an internal historical league | Matched seed-2000 G50 development comparison running |
+| [`historical-self-play-v1`](historical-self-play-v1/EXPERIMENT.md) | Contemporary self-play with or without an internal historical league | Matched seed-2000 G50 training and development comparison completed; neutral-to-negative result |
 
 The original experiment and all of its artifacts remain authoritative for the
-zero-knowledge condition. Results from the anchored experiment must not be
-pooled with it as if they came from the same training procedure.
+zero-knowledge condition. Results from the anchored and historical-league
+experiments must not be pooled with it as if they came from the same training
+procedure.
 
 ## Directory convention
 
