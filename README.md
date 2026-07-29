@@ -172,10 +172,18 @@ cargo run --release -p blocky-evolution -- retention-benchmark \
 ```
 
 Checkpoint paths are relative to the manifest. This observational command uses
-one candidate-independent opening pool for all pairings and plays both colors.
-Its report includes resolved genomes and phenotype fingerprints, opening
-provenance, raw per-opponent results, color splits, termination counts, and ply
-statistics. The example is configuration only; no production result is
-committed.
+one candidate-independent opening pool per opponent and plays both colors.
+Its report includes resolved genomes, checkpoint SHA-256 provenance, phenotype
+fingerprints, opponent-specific opening provenance, raw per-opponent results,
+color splits, termination counts, and ply statistics. In the example panel,
+the control-run champions are the primary held-out retention panel. The
+historical-league champions are secondary, non-held-out context because they
+may have been members of that run's training archive; aggregating both sources
+is descriptive rather than the primary comparison. The example is
+configuration only; no production result is committed. It defines 18
+opponents × 10 opponent-specific opening pairs × 2 candidates × 2 colors:
+180 distinct opening positions and 720 games when preflight duplicate checks
+pass. The benchmark rejects duplicate effective phenotypes rather than silently
+weighting an evaluator twice.
 
 The evaluation can be tuned through UCI spin options. Material values are exposed as `PawnValue`, `KnightValue`, `BishopValue`, `RookValue`, and `QueenValue` (range 0–1000). Mobility and king-safety weights are also configurable through `MobilityWeight`, the mobility weights for each piece type, and `KingSafetyWeight` (range 0–100).

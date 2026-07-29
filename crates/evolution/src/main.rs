@@ -43,14 +43,7 @@ fn run_retention_benchmark(command: RetentionBenchmarkCommand) -> ExitCode {
             return ExitCode::from(2);
         }
     };
-    let candidates = match blocky_evolution::retention::resolve_selections(&manifest.candidates) {
-        Ok(values) => values,
-        Err(error) => {
-            eprintln!("error: {error}");
-            return ExitCode::from(2);
-        }
-    };
-    let opponents = match blocky_evolution::retention::resolve_selections(&manifest.opponents) {
+    let (candidates, opponents) = match blocky_evolution::retention::resolve_manifest(&manifest) {
         Ok(values) => values,
         Err(error) => {
             eprintln!("error: {error}");

@@ -62,6 +62,7 @@ dependencies = [
  "blocky-chess",
  "serde",
  "serde_json",
+ "sha2",
  "shakmaty",
 ]
 

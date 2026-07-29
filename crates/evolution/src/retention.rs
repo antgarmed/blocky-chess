@@ -1,7 +1,7 @@
 //! Deterministic, observational comparison of evolved checkpoint individuals.
 
 use std::{
-    collections::BTreeSet,
+    collections::{BTreeMap, BTreeSet},
     error::Error,
     fmt, fs,
     ops::RangeInclusive,
@@ -9,6 +9,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use crate::{
     benchmark::{SerializableObservation, SerializableStatistics},
@@ -17,14 +18,17 @@ use crate::{
     historical::phenotype_fingerprint,
     openings::{Opening, OpeningGenerationError, OpeningPool},
     persistence::{read_checkpoint_unchecked_config, write_json_atomically, PersistenceError},
+    rng::derive_seed,
     self_play::GameOutcome,
     telemetry::{GameObservation, GameStatistics},
     training::TrainingConfig,
+    validation::ValidationConfig,
     GENE_COUNT,
 };
 
 pub const RETENTION_FORMAT: &str = "blocky-evolution-retention-benchmark";
 pub const RETENTION_VERSION: u32 = 1;
+const OPPONENT_OPENING_SEED_DOMAIN: u64 = 0x5245_5445_4e54_4f50;
 
 #[derive(Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
@@ -110,6 +114,7 @@ pub struct ResolvedIndividual {
     pub selector: GenerationSelector,
     pub resolved_generation: usize,
     pub training_seed: u64,
+    pub checkpoint_sha256: String,
     pub individual: Individual,
 }
 
@@ -121,7 +126,8 @@ pub struct RetentionReport {
     pub opening_derivation: OpeningDerivation,
     pub candidates: Vec<ResolvedIndividualReport>,
     pub opponents: Vec<ResolvedIndividualReport>,
-    pub shared_openings: Vec<SharedOpening>,
+    pub opponent_openings: Vec<OpponentOpeningPool>,
+    pub total_opening_positions: usize,
     pub candidate_results: Vec<CandidateResult>,
     pub total_games: usize,
     pub statistics: SerializableStatistics,
@@ -133,7 +139,8 @@ pub struct OpeningDerivation {
     pub master_seed: u64,
     pub candidate_independent: bool,
     pub candidate_order_independent: bool,
-    pub common_to_all_pairings: bool,
+    pub opponent_specific: bool,
+    pub opponent_order_independent: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -143,6 +150,7 @@ pub struct ResolvedIndividualReport {
     pub generation_selector: GenerationSelector,
     pub resolved_generation: usize,
     pub training_seed: u64,
+    pub checkpoint_sha256: String,
     pub individual_id: u64,
     pub genome: [f64; GENE_COUNT],
     pub effective_phenotype_fingerprint: [i64; 13],
@@ -153,6 +161,14 @@ pub struct SharedOpening {
     pub opening_id: u64,
     pub opening_seed: u64,
     pub opening_plies: usize,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+pub struct OpponentOpeningPool {
+    pub opponent_label: String,
+    pub opponent_identity_seed: u64,
+    pub opening_master_seed: u64,
+    pub openings: Vec<SharedOpening>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -230,6 +246,25 @@ pub enum RetentionError {
         requested: usize,
         available: usize,
     },
+    SeedCollision {
+        seed: u64,
+        labels: Vec<String>,
+    },
+    DuplicateCandidatePhenotype {
+        first: String,
+        second: String,
+    },
+    DuplicateOpponentPhenotype {
+        first: String,
+        second: String,
+    },
+    DuplicateResolvedIndividual {
+        first: String,
+        second: String,
+    },
+    DistinctOpponentOpeningsExhausted {
+        label: String,
+    },
     Opening(OpeningGenerationError),
     Game(String),
     WorkerPanic,
@@ -252,7 +287,12 @@ impl fmt::Display for RetentionError {
             Self::ZeroGeneration(label) => write!(f, "generation for `{label}` is 1-based and must be positive"),
             Self::Checkpoint { label, source } => write!(f, "could not resolve `{label}` checkpoint: {source}"),
             Self::UnavailableGeneration { label, requested, available } => write!(f, "generation {requested} for `{label}` is unavailable; checkpoint contains {available} completed generations"),
-            Self::Opening(source) => write!(f, "could not generate shared openings: {source}"),
+            Self::SeedCollision { seed, labels } => write!(f, "retention seed {seed} collides with {}", labels.join(", ")),
+            Self::DuplicateCandidatePhenotype { first, second } => write!(f, "candidate labels `{first}` and `{second}` resolve to the same effective phenotype"),
+            Self::DuplicateOpponentPhenotype { first, second } => write!(f, "opponent labels `{first}` and `{second}` resolve to the same effective phenotype"),
+            Self::DuplicateResolvedIndividual { first, second } => write!(f, "labels `{first}` and `{second}` resolve to the same individual"),
+            Self::DistinctOpponentOpeningsExhausted { label } => write!(f, "could not derive a distinct opening pool for opponent `{label}`"),
+            Self::Opening(source) => write!(f, "could not generate opponent opening pool: {source}"),
             Self::Game(message) => write!(f, "retention game failed: {message}"),
             Self::WorkerPanic => f.write_str("retention worker panicked"),
             Self::Persistence(source) => write!(f, "{source}"),
@@ -314,6 +354,25 @@ pub fn validate_manifest(manifest: &RetentionManifest) -> Result<(), RetentionEr
 pub fn resolve_selections(
     selections: &[CheckpointSelection],
 ) -> Result<Vec<ResolvedIndividual>, RetentionError> {
+    let mut cache = BTreeMap::new();
+    resolve_with_cache(selections, &mut cache)
+}
+
+pub fn resolve_manifest(
+    manifest: &RetentionManifest,
+) -> Result<(Vec<ResolvedIndividual>, Vec<ResolvedIndividual>), RetentionError> {
+    validate_manifest(manifest)?;
+    let mut cache = BTreeMap::new();
+    let candidates = resolve_with_cache(&manifest.candidates, &mut cache)?;
+    let opponents = resolve_with_cache(&manifest.opponents, &mut cache)?;
+    validate_resolved(manifest.config.seed, &candidates, &opponents)?;
+    Ok((candidates, opponents))
+}
+
+fn resolve_with_cache(
+    selections: &[CheckpointSelection],
+    cache: &mut BTreeMap<PathBuf, CheckpointData>,
+) -> Result<Vec<ResolvedIndividual>, RetentionError> {
     selections
         .iter()
         .map(|selection| {
@@ -325,27 +384,53 @@ pub fn resolve_selections(
             ) {
                 return Err(RetentionError::ZeroGeneration(selection.label.clone()));
             }
-            let (config, state) =
-                read_checkpoint_unchecked_config(&selection.checkpoint).map_err(|source| {
+            let checkpoint = if let Some(value) = cache.get(&selection.checkpoint) {
+                value
+            } else {
+                let bytes = fs::read(&selection.checkpoint).map_err(|source| {
                     RetentionError::Checkpoint {
                         label: selection.label.clone(),
-                        source,
+                        source: PersistenceError::Io {
+                            operation: "read",
+                            path: selection.checkpoint.clone(),
+                            source,
+                        },
                     }
                 })?;
+                let (config, state) = read_checkpoint_unchecked_config(&selection.checkpoint)
+                    .map_err(|source| RetentionError::Checkpoint {
+                        label: selection.label.clone(),
+                        source,
+                    })?;
+                cache.insert(
+                    selection.checkpoint.clone(),
+                    CheckpointData {
+                        training_seed: config.training().master_seed(),
+                        state,
+                        sha256: hex_digest(&bytes),
+                    },
+                );
+                cache
+                    .get(&selection.checkpoint)
+                    .expect("inserted checkpoint")
+            };
             let (resolved_generation, individual) = match selection.generation {
                 GenerationSelector::Generation { human_generation } => {
-                    let generation = state.generations().get(human_generation - 1).ok_or(
-                        RetentionError::UnavailableGeneration {
+                    let generation = checkpoint
+                        .state
+                        .generations()
+                        .get(human_generation - 1)
+                        .ok_or(RetentionError::UnavailableGeneration {
                             label: selection.label.clone(),
                             requested: human_generation,
-                            available: state.generations().len(),
-                        },
-                    )?;
+                            available: checkpoint.state.generations().len(),
+                        })?;
                     (human_generation, generation.best().individual().clone())
                 }
                 GenerationSelector::BestEver => {
-                    let best = state.best_ever();
-                    let generation = state
+                    let best = checkpoint.state.best_ever();
+                    let generation = checkpoint
+                        .state
                         .generations()
                         .iter()
                         .position(|entry| entry.ranked().contains(best))
@@ -358,11 +443,85 @@ pub fn resolve_selections(
                 checkpoint: selection.checkpoint.clone(),
                 selector: selection.generation.clone(),
                 resolved_generation,
-                training_seed: config.training().master_seed(),
+                training_seed: checkpoint.training_seed,
+                checkpoint_sha256: checkpoint.sha256.clone(),
                 individual,
             })
         })
         .collect()
+}
+
+struct CheckpointData {
+    training_seed: u64,
+    state: crate::evolution::EvolutionState,
+    sha256: String,
+}
+
+fn hex_digest(bytes: &[u8]) -> String {
+    let digest = Sha256::digest(bytes);
+    digest.iter().map(|byte| format!("{byte:02x}")).collect()
+}
+
+fn validate_resolved(
+    retention_seed: u64,
+    candidates: &[ResolvedIndividual],
+    opponents: &[ResolvedIndividual],
+) -> Result<(), RetentionError> {
+    let validation_seed = ValidationConfig::default().master_seed();
+    let labels = candidates
+        .iter()
+        .chain(opponents)
+        .filter(|individual| individual.training_seed == retention_seed)
+        .map(|individual| format!("{} training seed", individual.label))
+        .chain((validation_seed == retention_seed).then(|| "default final-validation seed".into()))
+        .collect::<Vec<_>>();
+    if !labels.is_empty() {
+        return Err(RetentionError::SeedCollision {
+            seed: retention_seed,
+            labels,
+        });
+    }
+    check_duplicate_phenotypes(candidates, true)?;
+    check_duplicate_phenotypes(opponents, false)?;
+    let mut identities = BTreeMap::new();
+    for individual in candidates.iter().chain(opponents) {
+        let identity = (
+            individual.checkpoint_sha256.clone(),
+            individual.resolved_generation,
+            individual.individual.id().0,
+        );
+        if let Some(first) = identities.insert(identity, individual.label.clone()) {
+            return Err(RetentionError::DuplicateResolvedIndividual {
+                first,
+                second: individual.label.clone(),
+            });
+        }
+    }
+    Ok(())
+}
+
+fn check_duplicate_phenotypes(
+    individuals: &[ResolvedIndividual],
+    candidate: bool,
+) -> Result<(), RetentionError> {
+    let mut fingerprints = BTreeMap::new();
+    for individual in individuals {
+        let fingerprint = phenotype_fingerprint(individual.individual.genome());
+        if let Some(first) = fingerprints.insert(fingerprint, individual.label.clone()) {
+            return Err(if candidate {
+                RetentionError::DuplicateCandidatePhenotype {
+                    first,
+                    second: individual.label.clone(),
+                }
+            } else {
+                RetentionError::DuplicateOpponentPhenotype {
+                    first,
+                    second: individual.label.clone(),
+                }
+            });
+        }
+    }
+    Ok(())
 }
 
 pub fn run_retention<F>(
@@ -390,20 +549,21 @@ where
     {
         return Err(RetentionError::ResolvedSetMismatch);
     }
-    let opening_config = TrainingConfig::new(
-        manifest.config.search_depth,
-        manifest.config.max_game_plies,
-        manifest.config.seed,
-        manifest.config.opening_plies(),
-        manifest.config.max_opening_attempts,
-    )
-    .map_err(|error| RetentionError::InvalidConfig(error.to_string()))?;
-    let pool = OpeningPool::generate(manifest.config.opening_pairs_per_opponent, &opening_config)
-        .map_err(RetentionError::Opening)?;
+    validate_resolved(manifest.config.seed, candidates, opponents)?;
+    let pools = generate_opponent_pools(opponents, &manifest.config)?;
+    let pool_indices = opponents
+        .iter()
+        .map(|opponent| {
+            pools
+                .iter()
+                .position(|pool| pool.opponent_label == opponent.label)
+                .expect("every opponent has an opening pool")
+        })
+        .collect::<Vec<_>>();
     let mut tasks = Vec::new();
     for candidate_index in 0..candidates.len() {
         for opponent_index in 0..opponents.len() {
-            for opening_index in 0..pool.openings().len() {
+            for opening_index in 0..pools[pool_indices[opponent_index]].openings.len() {
                 tasks.push((candidate_index, opponent_index, opening_index));
             }
         }
@@ -414,7 +574,8 @@ where
         for worker in 0..worker_count {
             let factory = &factory;
             let tasks = &tasks;
-            let openings = pool.openings();
+            let pools = &pools;
+            let pool_indices = &pool_indices;
             handles.push(scope.spawn(move || {
                 let mut runner = factory.create();
                 tasks
@@ -428,7 +589,7 @@ where
                             &mut runner,
                             &candidates[candidate].individual,
                             &opponents[opponent].individual,
-                            &openings[opening],
+                            &pools[pool_indices[opponent]].openings[opening],
                             &manifest.config,
                         );
                         (task_index, result)
@@ -449,12 +610,103 @@ where
     }
     let pairs = ordered.into_iter().map(Option::unwrap).collect::<Vec<_>>();
     Ok(build_report(
-        manifest,
-        candidates,
-        opponents,
-        pool.openings(),
-        &pairs,
+        manifest, candidates, opponents, &pools, &pairs,
     ))
+}
+
+fn generate_opponent_pools(
+    opponents: &[ResolvedIndividual],
+    config: &RetentionConfig,
+) -> Result<Vec<GeneratedOpponentPool>, RetentionError> {
+    let mut ordered = opponents.iter().collect::<Vec<_>>();
+    ordered.sort_by_key(|opponent| {
+        (
+            opponent_identity_seed(opponent),
+            opponent.checkpoint_sha256.clone(),
+            opponent.resolved_generation,
+            opponent.individual.id().0,
+        )
+    });
+    let mut pools = Vec::with_capacity(ordered.len());
+    for opponent in ordered {
+        let pool = generate_opponent_pool(opponent, config, &pools)?;
+        pools.push(pool);
+    }
+    Ok(pools)
+}
+
+fn generate_opponent_pool(
+    opponent: &ResolvedIndividual,
+    config: &RetentionConfig,
+    existing: &[GeneratedOpponentPool],
+) -> Result<GeneratedOpponentPool, RetentionError> {
+    let identity_seed = opponent_identity_seed(opponent);
+    for retry in 0..config.max_opening_attempts {
+        let seed = derive_seed(
+            config.seed,
+            identity_seed,
+            OPPONENT_OPENING_SEED_DOMAIN.wrapping_add(retry as u64),
+        );
+        let opening_config = TrainingConfig::new(
+            config.search_depth,
+            config.max_game_plies,
+            seed,
+            config.opening_plies(),
+            config.max_opening_attempts,
+        )
+        .map_err(|error| RetentionError::InvalidConfig(error.to_string()))?;
+        let pool = OpeningPool::generate(config.opening_pairs_per_opponent, &opening_config)
+            .map_err(RetentionError::Opening)?;
+        let openings = pool.openings().to_vec();
+        if openings.iter().all(|opening| {
+            existing.iter().all(|other| {
+                other
+                    .openings
+                    .iter()
+                    .all(|known| known.position != opening.position)
+            })
+        }) {
+            return Ok(GeneratedOpponentPool {
+                opponent_label: opponent.label.clone(),
+                identity_seed,
+                opening_master_seed: seed,
+                openings,
+            });
+        }
+    }
+    Err(RetentionError::DistinctOpponentOpeningsExhausted {
+        label: opponent.label.clone(),
+    })
+}
+
+#[derive(Clone)]
+struct GeneratedOpponentPool {
+    opponent_label: String,
+    identity_seed: u64,
+    opening_master_seed: u64,
+    openings: Vec<Opening>,
+}
+
+fn opponent_identity_seed(opponent: &ResolvedIndividual) -> u64 {
+    let mut stream = 0;
+    for chunk in opponent.checkpoint_sha256.as_bytes().chunks(8) {
+        let mut word = [0_u8; 8];
+        word[..chunk.len()].copy_from_slice(chunk);
+        stream = derive_seed(
+            stream,
+            u64::from_le_bytes(word),
+            OPPONENT_OPENING_SEED_DOMAIN,
+        );
+    }
+    stream = derive_seed(stream, opponent.resolved_generation as u64, 1);
+    stream = derive_seed(stream, opponent.individual.id().0, 2);
+    for (index, value) in phenotype_fingerprint(opponent.individual.genome())
+        .into_iter()
+        .enumerate()
+    {
+        stream = derive_seed(stream, value as u64, 3 + index as u64);
+    }
+    stream
 }
 
 fn play_pair<R: GameRunner>(
@@ -500,10 +752,10 @@ fn build_report(
     manifest: &RetentionManifest,
     candidates: &[ResolvedIndividual],
     opponents: &[ResolvedIndividual],
-    openings: &[Opening],
+    pools: &[GeneratedOpponentPool],
     pairs: &[OpeningPairResult],
 ) -> RetentionReport {
-    let per_pairing = openings.len();
+    let per_pairing = manifest.config.opening_pairs_per_opponent;
     let per_candidate = opponents.len() * per_pairing;
     let mut candidate_results = Vec::new();
     for (candidate_index, candidate) in candidates.iter().enumerate() {
@@ -527,21 +779,32 @@ fn build_report(
             master_seed: manifest.config.seed,
             candidate_independent: true,
             candidate_order_independent: true,
-            common_to_all_pairings: true,
+            opponent_specific: true,
+            opponent_order_independent: true,
         },
         candidates: candidates.iter().map(resolved_report).collect(),
         opponents: opponents.iter().map(resolved_report).collect(),
-        shared_openings: openings
+        opponent_openings: pools
             .iter()
-            .map(|opening| SharedOpening {
-                opening_id: opening.id.0,
-                opening_seed: opening.seed,
-                opening_plies: opening.moves.len(),
+            .map(|pool| OpponentOpeningPool {
+                opponent_label: pool.opponent_label.clone(),
+                opponent_identity_seed: pool.identity_seed,
+                opening_master_seed: pool.opening_master_seed,
+                openings: pool.openings.iter().map(shared_opening).collect(),
             })
             .collect(),
+        total_opening_positions: pools.iter().map(|pool| pool.openings.len()).sum(),
         total_games: pairs.len() * 2,
         statistics: GameStatistics::from_observations(all_observations).into(),
         candidate_results,
+    }
+}
+
+fn shared_opening(opening: &Opening) -> SharedOpening {
+    SharedOpening {
+        opening_id: opening.id.0,
+        opening_seed: opening.seed,
+        opening_plies: opening.moves.len(),
     }
 }
 
@@ -552,6 +815,7 @@ fn resolved_report(value: &ResolvedIndividual) -> ResolvedIndividualReport {
         generation_selector: value.selector.clone(),
         resolved_generation: value.resolved_generation,
         training_seed: value.training_seed,
+        checkpoint_sha256: value.checkpoint_sha256.clone(),
         individual_id: value.individual.id().0,
         genome: *value.individual.genome().genes(),
         effective_phenotype_fingerprint: phenotype_fingerprint(value.individual.genome()),
@@ -742,6 +1006,7 @@ mod tests {
             },
             resolved_generation: 5,
             training_seed: 123,
+            checkpoint_sha256: format!("{id:064x}"),
             individual: Individual::new(IndividualId(id), Genome::new(genes).unwrap()),
         }
     }
@@ -784,7 +1049,8 @@ mod tests {
         )
         .unwrap();
         assert_eq!(report.total_games, 8);
-        assert_eq!(report.shared_openings.len(), 2);
+        assert_eq!(report.opponent_openings.len(), 1);
+        assert_eq!(report.opponent_openings[0].openings.len(), 2);
         for result in &report.candidate_results {
             assert_eq!((result.wins, result.draws, result.losses), (2, 0, 2));
             assert_eq!(
@@ -804,8 +1070,8 @@ mod tests {
                     .iter()
                     .map(|opening| (opening.opening_id, opening.opening_seed))
                     .collect::<Vec<_>>(),
-                report
-                    .shared_openings
+                report.opponent_openings[0]
+                    .openings
                     .iter()
                     .map(|opening| (opening.opening_id, opening.opening_seed))
                     .collect::<Vec<_>>()
@@ -846,7 +1112,64 @@ mod tests {
                 .collect::<BTreeMap<_, _>>()
         };
         assert_eq!(keyed(&one), keyed(&many));
-        assert_eq!(one.shared_openings, many.shared_openings);
+        assert_eq!(one.opponent_openings, many.opponent_openings);
+
+        assert_ne!(
+            one.opponent_openings[0]
+                .openings
+                .iter()
+                .map(|opening| opening.opening_seed)
+                .collect::<Vec<_>>(),
+            one.opponent_openings[1]
+                .openings
+                .iter()
+                .map(|opening| opening.opening_seed)
+                .collect::<Vec<_>>()
+        );
+        for result in &one.candidate_results {
+            for pairing in &result.versus {
+                let pool = one
+                    .opponent_openings
+                    .iter()
+                    .find(|pool| pool.opponent_label == pairing.opponent_label)
+                    .unwrap();
+                assert_eq!(
+                    pairing
+                        .opening_results
+                        .iter()
+                        .map(|opening| opening.opening_seed)
+                        .collect::<Vec<_>>(),
+                    pool.openings
+                        .iter()
+                        .map(|opening| opening.opening_seed)
+                        .collect::<Vec<_>>()
+                );
+            }
+        }
+
+        let mut reordered_opponents = opponents.clone();
+        reordered_opponents.reverse();
+        let reordered = run_retention(
+            &manifest(3, &candidates, &reordered_opponents),
+            &candidates,
+            &reordered_opponents,
+            WhiteAlwaysWins,
+        )
+        .unwrap();
+        let opening_map = |report: &RetentionReport| {
+            report
+                .opponent_openings
+                .iter()
+                .map(|pool| {
+                    (
+                        pool.opponent_label.clone(),
+                        serde_json::to_value(pool).unwrap(),
+                    )
+                })
+                .collect::<BTreeMap<_, _>>()
+        };
+        assert_eq!(opening_map(&one), opening_map(&reordered));
+        assert_eq!(one.total_games, 16);
     }
 
     #[test]
@@ -865,6 +1188,15 @@ mod tests {
         assert_eq!(json["format"], RETENTION_FORMAT);
         assert_eq!(json["version"], RETENTION_VERSION);
         assert_eq!(json["opening_derivation"]["candidate_independent"], true);
+        assert_eq!(
+            json["candidates"][0]["checkpoint_sha256"]
+                .as_str()
+                .unwrap()
+                .len(),
+            64
+        );
+        assert_eq!(json["opponent_openings"].as_array().unwrap().len(), 1);
+        assert_eq!(json["total_opening_positions"], 2);
         assert_eq!(
             json["candidate_results"][0]["versus"]
                 .as_array()
@@ -910,6 +1242,52 @@ mod tests {
         assert!(matches!(
             validate_manifest(&duplicate),
             Err(RetentionError::DuplicateLabel(_))
+        ));
+    }
+
+    #[test]
+    fn rejects_seed_collisions_and_duplicate_resolved_evaluators() {
+        let a = individual("a", 1, 0);
+        let b_same_phenotype = individual("b", 2, 0);
+        let opponent = individual("opponent", 3, 1);
+        assert!(matches!(
+            validate_resolved(
+                991,
+                &[a.clone(), b_same_phenotype],
+                std::slice::from_ref(&opponent)
+            ),
+            Err(RetentionError::DuplicateCandidatePhenotype { .. })
+        ));
+        let opponent_same_phenotype = individual("opponent-2", 4, 1);
+        assert!(matches!(
+            validate_resolved(
+                991,
+                std::slice::from_ref(&a),
+                &[opponent.clone(), opponent_same_phenotype]
+            ),
+            Err(RetentionError::DuplicateOpponentPhenotype { .. })
+        ));
+        let duplicated = ResolvedIndividual {
+            label: "same-individual".into(),
+            ..a.clone()
+        };
+        assert!(matches!(
+            validate_resolved(991, std::slice::from_ref(&a), &[duplicated]),
+            Err(RetentionError::DuplicateResolvedIndividual { .. })
+        ));
+        assert!(matches!(
+            validate_resolved(123, &[a], &[opponent]),
+            Err(RetentionError::SeedCollision { .. })
+        ));
+        let candidate = individual("validation-candidate", 5, 2);
+        let opponent = individual("validation-opponent", 6, 3);
+        assert!(matches!(
+            validate_resolved(
+                ValidationConfig::default().master_seed(),
+                &[candidate],
+                &[opponent]
+            ),
+            Err(RetentionError::SeedCollision { .. })
         ));
     }
 
@@ -977,6 +1355,11 @@ mod tests {
         assert_eq!(resolved[0].individual.id().0, 0);
         assert_eq!(resolved[1].resolved_generation, 2);
         assert_eq!(resolved[1].individual.id().0, 1032);
+        assert_eq!(
+            resolved[0].checkpoint_sha256,
+            hex_digest(&fs::read(&left).unwrap())
+        );
+        assert_eq!(resolved[0].checkpoint_sha256.len(), 64);
         fs::remove_file(left).unwrap();
         fs::remove_file(right).unwrap();
     }
