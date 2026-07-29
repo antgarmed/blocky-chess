@@ -86,6 +86,7 @@ per-run stdout and stderr logs, and completion status under:
 ```text
 experiments/historical-self-play-v1/runs/
   control-seed-2000/
+  league-20pct-seed-2000/
   league-40pct-seed-2000/
 ```
 
