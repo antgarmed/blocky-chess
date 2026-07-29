@@ -1,0 +1,26 @@
+{
+  "run_id": "league-20pct-seed-2000",
+  "condition": "20 percent historical league",
+  "source_revision": "1cdc8b4da69c05c62ef30bbc62739218f938ecda",
+  "historical_training_baseline_revision": "55f914499cfe911cfcfc33954ccaf4502b2c92c9",
+  "build_profile": "release",
+  "rustc": "1.97.1 (8bab26f4f 2026-07-14)",
+  "cargo": "1.97.1 (c980f4866 2026-06-30)",
+  "workers": 16,
+  "cpu": "13th Gen Intel(R) Core(TM) i9-13900HX (2.20 GHz)",
+  "ram": "32.0 GB (31.7 GB usable)",
+  "training_seed": 2000,
+  "target_generations": 50,
+  "checkpoint_every_generations": 1,
+  "historical_weight_percent": 20,
+  "historical_opponents": 4,
+  "historical_opening_pairs": 1,
+  "historical_insertion_cadence": 5,
+  "historical_max_size": 16,
+  "notes": [
+    "Training-only G50 development batch.",
+    "No sealed validation seed is consumed during training.",
+    "Training algorithm and non-historical hyperparameters match historical-self-play-v1.",
+    "Current source revision includes post-40% retention-benchmark tooling; training source paths are unchanged in algorithmic intent."
+  ]
+}

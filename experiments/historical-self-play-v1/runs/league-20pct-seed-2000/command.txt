@@ -1,0 +1,24 @@
+target\release\blocky-evolution.exe train `
+  --training-only `
+  --generations 50 `
+  --population-size 32 `
+  --swiss-rounds 5 `
+  --elite-count 2 `
+  --parent-candidate-count 3 `
+  --gene-mutation-probability 0.15 `
+  --strong-mutation-probability 0.02 `
+  --mutation-step 0.10 `
+  --strong-mutation-step 0.50 `
+  --search-depth 4 `
+  --max-game-plies 200 `
+  --training-seed 2000 `
+  --opening-min-plies 4 `
+  --opening-max-plies 10 `
+  --historical-weight-percent 20 `
+  --historical-opponents 4 `
+  --historical-opening-pairs 1 `
+  --historical-insertion-cadence 5 `
+  --historical-max-size 16 `
+  --workers 16 `
+  --checkpoint experiments/historical-self-play-v1/runs/league-20pct-seed-2000/checkpoint.json `
+  --checkpoint-every 1

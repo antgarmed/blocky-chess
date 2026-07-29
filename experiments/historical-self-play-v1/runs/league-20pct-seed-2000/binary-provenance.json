@@ -1,0 +1,21 @@
+﻿{
+    "format":  "blocky-evolution-binary-provenance",
+    "version":  1,
+    "recorded_at_utc":  "2026-07-29T18:00:39.3264194Z",
+    "expected_source_revision":  "1cdc8b4da69c05c62ef30bbc62739218f938ecda",
+    "repository_head":  "1cdc8b4da69c05c62ef30bbc62739218f938ecda",
+    "verified_source_paths":  [
+                                  "Cargo.toml",
+                                  "Cargo.lock",
+                                  "build.rs",
+                                  "src",
+                                  "crates"
+                              ],
+    "build_profile":  "release",
+    "cargo_version":  "cargo 1.97.1 (c980f4866 2026-06-30)",
+    "rustc_version":  "rustc 1.97.1 (8bab26f4f 2026-07-14)",
+    "executable":  "target/release/blocky-evolution.exe",
+    "executable_length_bytes":  2073088,
+    "executable_last_write_time_utc":  "2026-07-29T15:58:18.8767781Z",
+    "executable_sha256":  "2CF8C8666FEE7949301874A83AD54C8668DBE2785A9BC8965DA3431EF925D9D4"
+}

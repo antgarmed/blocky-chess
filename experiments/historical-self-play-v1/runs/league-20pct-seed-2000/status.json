@@ -1,0 +1,10 @@
+﻿{
+    "state":  "completed",
+    "process_id":  28520,
+    "exit_code":  0,
+    "started_at_utc":  "2026-07-29T18:00:45.0476399Z",
+    "ended_at_utc":  "2026-07-29T19:15:30.1205276Z",
+    "elapsed_seconds":  4485.073,
+    "checkpoint_next_generation":  50,
+    "stderr_bytes":  0
+}
