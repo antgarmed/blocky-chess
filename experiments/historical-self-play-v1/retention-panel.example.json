@@ -1,0 +1,36 @@
+{
+  "config": {
+    "search_depth": 4,
+    "opening_pairs_per_opponent": 10,
+    "max_game_plies": 200,
+    "opening_min_plies": 4,
+    "opening_max_plies": 10,
+    "max_opening_attempts": 100,
+    "seed": 2026072901,
+    "workers": 16
+  },
+  "candidates": [
+    { "label": "control-g50", "checkpoint": "runs/control-seed-2000/checkpoint.json", "generation": { "kind": "generation", "human_generation": 50 } },
+    { "label": "historical-g50", "checkpoint": "runs/league-40pct-seed-2000/checkpoint.json", "generation": { "kind": "generation", "human_generation": 50 } }
+  ],
+  "opponents": [
+    { "label": "control-g05", "checkpoint": "runs/control-seed-2000/checkpoint.json", "generation": { "kind": "generation", "human_generation": 5 } },
+    { "label": "control-g10", "checkpoint": "runs/control-seed-2000/checkpoint.json", "generation": { "kind": "generation", "human_generation": 10 } },
+    { "label": "control-g15", "checkpoint": "runs/control-seed-2000/checkpoint.json", "generation": { "kind": "generation", "human_generation": 15 } },
+    { "label": "control-g20", "checkpoint": "runs/control-seed-2000/checkpoint.json", "generation": { "kind": "generation", "human_generation": 20 } },
+    { "label": "control-g25", "checkpoint": "runs/control-seed-2000/checkpoint.json", "generation": { "kind": "generation", "human_generation": 25 } },
+    { "label": "control-g30", "checkpoint": "runs/control-seed-2000/checkpoint.json", "generation": { "kind": "generation", "human_generation": 30 } },
+    { "label": "control-g35", "checkpoint": "runs/control-seed-2000/checkpoint.json", "generation": { "kind": "generation", "human_generation": 35 } },
+    { "label": "control-g40", "checkpoint": "runs/control-seed-2000/checkpoint.json", "generation": { "kind": "generation", "human_generation": 40 } },
+    { "label": "control-g45", "checkpoint": "runs/control-seed-2000/checkpoint.json", "generation": { "kind": "generation", "human_generation": 45 } },
+    { "label": "historical-g05", "checkpoint": "runs/league-40pct-seed-2000/checkpoint.json", "generation": { "kind": "generation", "human_generation": 5 } },
+    { "label": "historical-g10", "checkpoint": "runs/league-40pct-seed-2000/checkpoint.json", "generation": { "kind": "generation", "human_generation": 10 } },
+    { "label": "historical-g15", "checkpoint": "runs/league-40pct-seed-2000/checkpoint.json", "generation": { "kind": "generation", "human_generation": 15 } },
+    { "label": "historical-g20", "checkpoint": "runs/league-40pct-seed-2000/checkpoint.json", "generation": { "kind": "generation", "human_generation": 20 } },
+    { "label": "historical-g25", "checkpoint": "runs/league-40pct-seed-2000/checkpoint.json", "generation": { "kind": "generation", "human_generation": 25 } },
+    { "label": "historical-g30", "checkpoint": "runs/league-40pct-seed-2000/checkpoint.json", "generation": { "kind": "generation", "human_generation": 30 } },
+    { "label": "historical-g35", "checkpoint": "runs/league-40pct-seed-2000/checkpoint.json", "generation": { "kind": "generation", "human_generation": 35 } },
+    { "label": "historical-g40", "checkpoint": "runs/league-40pct-seed-2000/checkpoint.json", "generation": { "kind": "generation", "human_generation": 40 } },
+    { "label": "historical-g45", "checkpoint": "runs/league-40pct-seed-2000/checkpoint.json", "generation": { "kind": "generation", "human_generation": 45 } }
+  ]
+}

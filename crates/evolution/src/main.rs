@@ -3,7 +3,7 @@ use std::{env, process::ExitCode};
 use blocky_evolution::{
     cli::{
         render_summary, write_stdout_line, BenchmarkCommand, Command, ConsoleProgressObserver,
-        TrainCommand, ValidateCommand, HELP,
+        RetentionBenchmarkCommand, TrainCommand, ValidateCommand, HELP,
     },
     encounter::ProductionGameRunner,
     evolution::{EvolutionEngine, SelfPlayPopulationEvaluator},
@@ -31,7 +31,59 @@ fn main() -> ExitCode {
         Command::Train(command) => run_train(*command),
         Command::Validate(command) => run_validate(*command),
         Command::Benchmark(command) => run_benchmark(*command),
+        Command::RetentionBenchmark(command) => run_retention_benchmark(*command),
     }
+}
+
+fn run_retention_benchmark(command: RetentionBenchmarkCommand) -> ExitCode {
+    let manifest = match blocky_evolution::retention::read_manifest(&command.manifest) {
+        Ok(manifest) => manifest,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let candidates = match blocky_evolution::retention::resolve_selections(&manifest.candidates) {
+        Ok(values) => values,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    let opponents = match blocky_evolution::retention::resolve_selections(&manifest.opponents) {
+        Ok(values) => values,
+        Err(error) => {
+            eprintln!("error: {error}");
+            return ExitCode::from(2);
+        }
+    };
+    write_stdout_line(&format!(
+        "Retention benchmark started: {} candidates, {} opponents, {} opening pairs",
+        candidates.len(),
+        opponents.len(),
+        manifest.config.opening_pairs_per_opponent
+    ));
+    let report = match blocky_evolution::retention::run_retention(
+        &manifest,
+        &candidates,
+        &opponents,
+        ProductionGameRunner,
+    ) {
+        Ok(report) => report,
+        Err(error) => {
+            eprintln!("error: retention benchmark failed: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    if let Err(error) = blocky_evolution::retention::write_report(&command.report, &report) {
+        eprintln!("error: could not export retention benchmark report: {error}");
+        return ExitCode::FAILURE;
+    }
+    write_stdout_line(&format!(
+        "Retention benchmark complete: {} games",
+        report.total_games
+    ));
+    ExitCode::SUCCESS
 }
 
 fn run_benchmark(command: BenchmarkCommand) -> ExitCode {

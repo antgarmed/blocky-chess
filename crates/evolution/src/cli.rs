@@ -27,6 +27,7 @@ Usage:
   blocky-evolution train [OPTIONS]
   blocky-evolution validate --checkpoint PATH --report PATH [OPTIONS]
   blocky-evolution benchmark --checkpoint PATH --report PATH [OPTIONS]
+  blocky-evolution retention-benchmark --manifest PATH --report PATH
   blocky-evolution --help
 
 Evolution:
@@ -95,6 +96,13 @@ pub enum Command {
     Train(Box<TrainCommand>),
     Validate(Box<ValidateCommand>),
     Benchmark(Box<BenchmarkCommand>),
+    RetentionBenchmark(Box<RetentionBenchmarkCommand>),
+}
+
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct RetentionBenchmarkCommand {
+    pub manifest: PathBuf,
+    pub report: PathBuf,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -149,6 +157,11 @@ impl TrainCommand {
                     .map(Box::new)
                     .map(Command::Benchmark)
             }
+            Some("retention-benchmark") => {
+                return RetentionBenchmarkCommand::parse(&args)
+                    .map(Box::new)
+                    .map(Command::RetentionBenchmark)
+            }
             Some("train") => {}
             Some(command) => return Err(CliError::UnknownCommand(command.to_owned())),
             None => return Err(CliError::MissingCommand),
@@ -173,6 +186,30 @@ impl TrainCommand {
             index += 2;
         }
         values.build().map(Box::new).map(Command::Train)
+    }
+}
+
+impl RetentionBenchmarkCommand {
+    fn parse(args: &[String]) -> Result<Self, CliError> {
+        let mut manifest = None;
+        let mut report = None;
+        let mut index = 1;
+        while index < args.len() {
+            let flag = &args[index];
+            let value = args
+                .get(index + 1)
+                .ok_or_else(|| CliError::MissingValue(flag.clone()))?;
+            match flag.as_str() {
+                "--manifest" => manifest = Some(PathBuf::from(value)),
+                "--report" => report = Some(PathBuf::from(value)),
+                _ => return Err(CliError::UnknownOption(flag.clone())),
+            }
+            index += 2;
+        }
+        Ok(Self {
+            manifest: manifest.ok_or(CliError::MissingRequiredOption("--manifest"))?,
+            report: report.ok_or(CliError::MissingRequiredOption("--report"))?,
+        })
     }
 }
 
@@ -368,7 +405,7 @@ impl fmt::Display for CliError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::MissingCommand => formatter
-                .write_str("missing command; use `train`, `validate`, `benchmark`, or `--help`"),
+                .write_str("missing command; use `train`, `validate`, `benchmark`, `retention-benchmark`, or `--help`"),
             Self::UnknownCommand(command) => {
                 write!(formatter, "unknown command `{command}`; use `--help`")
             }
@@ -1046,7 +1083,10 @@ mod tests {
     fn train(args: &[&str]) -> TrainCommand {
         match TrainCommand::from_args(args.iter().copied()).unwrap() {
             Command::Train(command) => *command,
-            Command::Help | Command::Validate(_) | Command::Benchmark(_) => {
+            Command::Help
+            | Command::Validate(_)
+            | Command::Benchmark(_)
+            | Command::RetentionBenchmark(_) => {
                 panic!("expected train command")
             }
         }
@@ -1455,5 +1495,22 @@ mod tests {
             ]),
             Err(CliError::BenchmarkConfig(message)) if message.contains("depth")
         ));
+    }
+
+    #[test]
+    fn parses_retention_benchmark_manifest_and_report() {
+        let command = TrainCommand::from_args([
+            "retention-benchmark",
+            "--manifest",
+            "panel.json",
+            "--report",
+            "result.json",
+        ])
+        .unwrap();
+        let Command::RetentionBenchmark(command) = command else {
+            panic!("expected retention benchmark command");
+        };
+        assert_eq!(command.manifest, PathBuf::from("panel.json"));
+        assert_eq!(command.report, PathBuf::from("result.json"));
     }
 }

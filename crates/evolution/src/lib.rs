@@ -14,6 +14,7 @@ pub mod openings;
 pub mod pairing;
 pub mod persistence;
 pub mod progress;
+pub mod retention;
 pub mod rng;
 pub mod self_play;
 pub mod telemetry;

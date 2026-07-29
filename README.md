@@ -162,4 +162,20 @@ knowledge-free initial distribution. Both controls use color-swapped held-out
 openings and are exploratory; they do not replace sealed validation against
 `EvaluationConfig::default()`.
 
+Compare evolved checkpoint champions against one fixed historical panel with
+a JSON manifest:
+
+```bash
+cargo run --release -p blocky-evolution -- retention-benchmark \
+  --manifest experiments/historical-self-play-v1/retention-panel.example.json \
+  --report experiments/historical-self-play-v1/retention-panel.json
+```
+
+Checkpoint paths are relative to the manifest. This observational command uses
+one candidate-independent opening pool for all pairings and plays both colors.
+Its report includes resolved genomes and phenotype fingerprints, opening
+provenance, raw per-opponent results, color splits, termination counts, and ply
+statistics. The example is configuration only; no production result is
+committed.
+
 The evaluation can be tuned through UCI spin options. Material values are exposed as `PawnValue`, `KnightValue`, `BishopValue`, `RookValue`, and `QueenValue` (range 0–1000). Mobility and king-safety weights are also configurable through `MobilityWeight`, the mobility weights for each piece type, and `KingSafetyWeight` (range 0–100).
