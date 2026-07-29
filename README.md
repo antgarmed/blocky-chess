@@ -180,9 +180,9 @@ the control-run champions are the primary held-out retention panel. The
 historical-league champions are secondary, non-held-out context because they
 may have been members of that run's training archive; aggregating both sources
 is descriptive rather than the primary comparison. The example is
-configuration only; no production result is committed. It defines 18
+configuration only; no production result is committed. It defines 17
 opponents × 10 opponent-specific opening pairs × 2 candidates × 2 colors:
-180 distinct opening positions and 720 games when preflight duplicate checks
+170 distinct opening positions and 680 games when preflight duplicate checks
 pass. The benchmark rejects duplicate effective phenotypes rather than silently
 weighting an evaluator twice.
 

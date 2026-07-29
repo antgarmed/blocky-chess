@@ -131,6 +131,17 @@ powershell.exe -NoProfile -ExecutionPolicy Bypass `
 
 ## Monitoring
 
+## Retention panel
+
+The example retention panel keeps the control champions at G5, G10, ..., G45
+as the primary held-out panel. The historical-league panel starts at G10 and
+continues through G45; those champions may have participated in the league's
+training archive, so they are secondary and non-held-out. The combined result
+is descriptive and must not replace the primary control-panel comparison.
+
+The corrected example has 17 opponents, 10 opening pairs per opponent, 170
+distinct opening positions, and 680 games for two candidates with both colors.
+
 After each condition starts, verify process liveness, increasing CPU time,
 expected stdout phase, empty stderr, and checkpoint validity:
 
